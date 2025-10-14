@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Jane App Scraper",
+  "version": "1.0.0",
+  "description": "Chrome extension for automating Jane App login and scraping",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "action": {
+    "default_title": "Open Jane Scraper"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["jszip.min.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
