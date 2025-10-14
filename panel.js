@@ -14,6 +14,7 @@
 
 // DOM element references
 const startBtn = document.getElementById('start-btn');
+const startMtBtn = document.getElementById('start-mt-btn');
 const stopBtn = document.getElementById('stop-btn');
 const statusMessages = document.getElementById('status-messages');
 const statusCount = document.getElementById('status-count');
@@ -103,6 +104,46 @@ startBtn.addEventListener('click', async () => {
   });
 
   updateStatus('Navigating to Jane App...');
+});
+
+// Start Multi-Thread button
+startMtBtn.addEventListener('click', async () => {
+  const clinicName = document.getElementById('clinic-name').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value.trim();
+
+  if (!clinicName || !email || !password) {
+    updateStatus('Please fill in all fields', 'error');
+    return;
+  }
+
+  formSection.classList.add('hidden');
+  statusContainer.classList.add('expanded');
+  startBtn.style.display = 'none';
+  startMtBtn.style.display = 'none';
+  stopBtn.style.display = 'block';
+  updateStatus('Starting multi-threaded scraping (2 tabs)...');
+
+  // Ask background to start N threads and coordinate work
+  chrome.runtime.sendMessage({
+    action: 'startThreads',
+    clinicName,
+    email,
+    password,
+    startingIndex: 1,
+    numThreads: 2,
+    resume: false  // start clean; set true only when resuming a run
+  }, (resp) => {
+    if (chrome.runtime.lastError) {
+      updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
+      return;
+    }
+    if (!resp || !resp.ok) {
+      updateStatus('❌ Could not start threads: ' + (resp?.error || 'unknown'), 'error');
+    } else {
+      updateStatus('✅ Threads started');
+    }
+  });
 });
 
 /**

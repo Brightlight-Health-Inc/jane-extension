@@ -93,6 +93,196 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // ========================= Threaded Coordinator Actions =========================
+  if (request.action === 'startThreads') {
+    (async () => {
+      try {
+        const { clinicName, email, password, startingIndex = 1, numThreads = 2, resume = false } = request;
+
+        const completedPatients = {};
+        if (resume) {
+          // Scan completed zips to build completedPatients map
+          const downloads = await chrome.downloads.search({ filenameRegex: 'jane-scraper/.+__PID\\d+\\.zip$', exists: true });
+          for (const d of downloads || []) {
+            const m = d.filename && d.filename.match(/__PID(\d+)\.zip$/);
+            if (m) {
+              const pid = parseInt(m[1], 10);
+              if (!Number.isNaN(pid)) {
+                completedPatients[pid] = { filename: d.filename, endTime: d.endTime };
+              }
+            }
+          }
+        }
+
+        // Initialize registry state
+        const activeThreads = {};
+        const patientLocks = {};
+        await chrome.storage.local.set({
+          workRegistry: { clinicName, startingIndex, nextPatientId: startingIndex, globalStop: false },
+          activeThreads,
+          patientLocks,
+          completedPatients
+        });
+
+        // Helper to send message to tab with retries until content script is ready
+        const sendMessageWithRetry = (tabId, message, maxAttempts = 30, delayMs = 1000) => new Promise((resolve) => {
+          let attempt = 0;
+          const trySend = () => {
+            attempt++;
+            chrome.tabs.sendMessage(tabId, message, (resp) => {
+              if (chrome.runtime.lastError) {
+                if (attempt >= maxAttempts) return resolve(false);
+                setTimeout(trySend, delayMs);
+              } else {
+                resolve(true);
+              }
+            });
+          };
+          trySend();
+        });
+
+        // Create N tabs and kick off workers with staggered init (20s apart)
+        for (let i = 1; i <= numThreads; i++) {
+          const threadId = `T${i}`;
+          const tab = await chrome.tabs.create({ url: `https://${clinicName}.janeapp.com/admin` });
+          activeThreads[threadId] = { tabId: tab.id, status: 'initializing', patientId: null };
+          // Persist after each creation to keep state
+          await chrome.storage.local.set({ activeThreads });
+          // Initialize content script thread after offset
+          const delayMs = (i - 1) * 20000;
+          setTimeout(async () => {
+            await sendMessageWithRetry(tab.id, { action: 'initThread', threadId, clinicName, email, password, loginDelayMs: delayMs });
+          }, delayMs);
+        }
+
+        sendResponse({ ok: true });
+      } catch (e) {
+        console.warn('startThreads error:', e);
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'requestWork') {
+    (async () => {
+      try {
+        const { threadId } = request;
+        const data = await chrome.storage.local.get(['workRegistry', 'patientLocks', 'completedPatients', 'activeThreads']);
+        const workRegistry = data.workRegistry || {};
+        const patientLocks = data.patientLocks || {};
+        const completedPatients = data.completedPatients || {};
+        const activeThreads = data.activeThreads || {};
+
+        let { nextPatientId = 1 } = workRegistry;
+
+        // Find next available patient ID not locked and not completed
+        let assignedId = null;
+        let probeId = nextPatientId;
+        for (let attempts = 0; attempts < 5000; attempts++) {
+          if (!completedPatients[probeId] && (!patientLocks[probeId] || patientLocks[probeId].threadId === threadId)) {
+            assignedId = probeId;
+            break;
+          }
+          probeId++;
+        }
+
+        if (assignedId == null) {
+          sendResponse({ status: 'done' });
+          return;
+        }
+
+        // Lock and advance pointer
+        patientLocks[assignedId] = { threadId, timestamp: Date.now(), status: 'locked' };
+        workRegistry.nextPatientId = assignedId + 1;
+        if (activeThreads[threadId]) {
+          activeThreads[threadId].status = 'working';
+          activeThreads[threadId].patientId = assignedId;
+        }
+        await chrome.storage.local.set({ patientLocks, workRegistry, activeThreads });
+
+        sendResponse({ status: 'assigned', patientId: assignedId, clinicName: workRegistry.clinicName });
+      } catch (e) {
+        console.warn('requestWork error:', e);
+        sendResponse({ status: 'error', error: e?.message || String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'getThreadAssignment') {
+    (async () => {
+      try {
+        const tabId = sender?.tab?.id;
+        const data = await chrome.storage.local.get('activeThreads');
+        const activeThreads = data.activeThreads || {};
+        const entry = Object.entries(activeThreads).find(([, v]) => v.tabId === tabId);
+        if (entry) {
+          const [threadId] = entry;
+          sendResponse({ ok: true, threadId });
+        } else {
+          sendResponse({ ok: false });
+        }
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'patientNotFound' || request.action === 'patientNoCharts') {
+    (async () => {
+      try {
+        const { threadId, patientId } = request;
+        const data = await chrome.storage.local.get(['patientLocks', 'activeThreads']);
+        const patientLocks = data.patientLocks || {};
+        const activeThreads = data.activeThreads || {};
+        if (patientLocks[patientId] && patientLocks[patientId].threadId === threadId) {
+          delete patientLocks[patientId];
+        }
+        if (activeThreads[threadId]) {
+          activeThreads[threadId].status = 'idle';
+          activeThreads[threadId].patientId = null;
+        }
+        await chrome.storage.local.set({ patientLocks, activeThreads });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'completeWork') {
+    (async () => {
+      try {
+        const { threadId, patientId, patientName, zipFilename, success } = request;
+        const data = await chrome.storage.local.get(['patientLocks', 'activeThreads', 'completedPatients']);
+        const patientLocks = data.patientLocks || {};
+        const activeThreads = data.activeThreads || {};
+        const completedPatients = data.completedPatients || {};
+
+        if (patientLocks[patientId] && patientLocks[patientId].threadId === threadId) {
+          delete patientLocks[patientId];
+        }
+        if (success) {
+          completedPatients[patientId] = { patientName, filename: zipFilename, timestamp: Date.now(), threadId };
+        }
+        if (activeThreads[threadId]) {
+          activeThreads[threadId].status = 'idle';
+          activeThreads[threadId].patientId = null;
+        }
+        await chrome.storage.local.set({ patientLocks, activeThreads, completedPatients });
+
+        sendResponse({ ok: true });
+      } catch (e) {
+        console.warn('completeWork error:', e);
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true;
+  }
+
   sendResponse({ received: true });
   return true;
 });
