@@ -19,8 +19,7 @@
     "default_path": "panel.html"
   },
   "action": {
-    "default_title": "Open Jane Scraper"
-  },
+    "default_title": "Open Jane Scraper" },
   "background": {
     "service_worker": "background.js"
   },

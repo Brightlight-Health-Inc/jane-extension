@@ -20,12 +20,11 @@ let shouldStop = false; // Set to true when user clicks stop
 let currentPatientId = 1; // The patient we're currently processing
 let activeTimeouts = []; // Track timeouts so we can cancel them on stop
 
-// Threaded mode coordination
-let threadMode = false;
+// Thread coordination (all runs use threading now, even single thread)
 let threadId = null;
 
 function getStorageKey(key) {
-  return threadMode ? `${threadId}_${key}` : key;
+  return threadId ? `${threadId}_${key}` : key;
 }
 
 // Files for current patient (stored in memory for zipping)
@@ -172,10 +171,71 @@ function cancelAllTimeouts() {
 }
 
 function sendStatus(message, type = 'info') {
+  // Automatically prefix with thread ID if available
+  const prefix = threadId ? `[${threadId}] ` : '';
+  const fullMessage = prefix + message;
   chrome.runtime.sendMessage({
     action: 'statusUpdate',
-    status: { message, type }
+    status: { message: fullMessage, type, threadId }
   });
+}
+
+// Detect Jane rate-limit / slowdown page and trigger coordinated recovery
+async function detectAndHandleRateLimit() {
+  try {
+    // Texts observed on slowdown page (require BOTH to avoid false positives)
+    const bodyText = (document.body?.innerText || '').toLowerCase();
+    const sawWhoa = bodyText.includes('whoa there friend');
+    const sawMoment = bodyText.includes('please take a moment');
+    if (!(sawWhoa && sawMoment)) return false;
+
+    // Signal background to pause everyone and coordinate recovery
+    const clinicName = getClinicNameFromUrl();
+    sendStatus('⚠️ Rate limit page detected. Pausing all threads and recovering...', 'error');
+
+    // Capture current resume state for this thread if available
+    let resumeState = null;
+    try {
+      const scoped = await chrome.storage.local.get(getStorageKey('scrapingState'));
+      resumeState = scoped[getStorageKey('scrapingState')] || null;
+    } catch (_) {}
+
+    await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: 'globalCooldownAndRecover', clinicName, threadId, resumeState }, () => resolve());
+    });
+
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function getClinicNameFromUrl() {
+  try {
+    const host = window.location.hostname || '';
+    const match = host.match(/^([^\.]+)\.janeapp\.com$/);
+    return match ? match[1] : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+async function scheduleRecovery(clinicName, resumeState) {
+  if (!clinicName) clinicName = getClinicNameFromUrl();
+  if (!clinicName) return;
+  if (shouldStop) return;
+
+  sendStatus(`🔁 Recovering from error, returning to schedule...`);
+  await chrome.storage.local.set({
+    [getStorageKey('scrapingState')]: {
+      action: 'recover',
+      clinicName,
+      resumeState,
+      phase: 'toSchedule'
+    }
+  });
+  await sleep(250);
+  window.location.href = `https://${clinicName}.janeapp.com/`;
 }
 
 async function waitForChartsLoaded({ maxWaitMs = 45000 } = {}) {
@@ -207,10 +267,15 @@ async function waitForChartsLoaded({ maxWaitMs = 45000 } = {}) {
 
 async function login(email, password) {
   try {
-    await sleep(10000); // Wait for initial page load
+    // Wait for initial page load or DOM readiness
+    if (document.readyState === 'loading') {
+      await new Promise(r => document.addEventListener('DOMContentLoaded', r));
+    }
+    await sleep(500);
 
-    // Check if already logged in
-    if (window.location.href.includes('/admin#schedule')) {
+    // Check if already logged in (admin shell present, not showing login form)
+    const alreadyLoggedIn = window.location.href.includes('/admin') && !document.querySelector('input[name="auth_key"], input#auth_key');
+    if (alreadyLoggedIn) {
       sendStatus('✅ Already logged in!', 'success');
       return true;
     }
@@ -265,7 +330,7 @@ async function login(email, password) {
 
     // Click sign in button
     sendStatus('🔘 Clicking Sign In button...');
-    const signInButton = document.querySelector('button#log_in, button[type="submit"]');
+    const signInButton = document.querySelector('button#log_in, form button[type="submit"], button:has([data-test="sign-in"])');
 
     if (!signInButton) {
       sendStatus('❌ Sign In button not found', 'error');
@@ -287,13 +352,16 @@ async function login(email, password) {
 // ============================================================================
 
 async function navigateToPatient(clinicName, patientId) {
+  sendStatus(`🔄 Navigating to patient ${patientId}...`);
   await sleep(500);
   const url = `https://${clinicName}.janeapp.com/admin#patients/${patientId}`;
   window.location.href = url;
   await sleep(2000);
+  sendStatus(`✓ Arrived at patient ${patientId} page`);
 }
 
 async function navigateToCharts(clinicName, patientId) {
+  sendStatus(`🔄 Navigating to charts page for patient ${patientId}...`);
   await sleep(500);
   const url = `https://${clinicName}.janeapp.com/admin#patients/${patientId}/charts`;
   window.location.href = url;
@@ -301,17 +369,27 @@ async function navigateToCharts(clinicName, patientId) {
   // Give the SPA time to swap views and render
   await sleep(1500);
   sendStatus(`⏳ Waiting for charts to render...`);
-  await waitForChartsLoaded({ maxWaitMs: 45000 });
+  const chartsLoaded = await waitForChartsLoaded({ maxWaitMs: 25000 });
+  if (chartsLoaded) {
+    sendStatus(`✓ Charts page loaded successfully`);
+  } else {
+    sendStatus(`⚠️ Charts page load timeout`, 'error');
+  }
 
   // Now greedily load everything (be robust to capitalization)
+  let loadMoreCount = 0;
   while (true) {
     sendStatus(`🔍 Looking for "Load More" button...`);
     const loadMoreBtn = Array.from(document.querySelectorAll('button.btn.btn-link'))
       .find(btn => (btn.textContent || '').trim().toLowerCase() === 'load more');
-    if (!loadMoreBtn) break;
+    if (!loadMoreBtn) {
+      sendStatus(`✓ All charts loaded (clicked ${loadMoreCount} "Load More" button${loadMoreCount !== 1 ? 's' : ''})`);
+      break;
+    }
     loadMoreBtn.click();
-    sendStatus(`🔍 Clicked "Load More" button...`);
-    await sleep(2500);
+    loadMoreCount++;
+    sendStatus(`🔍 Clicked "Load More" button #${loadMoreCount}`);
+    await sleep(3000);
   }
 }
 
@@ -320,15 +398,17 @@ async function navigateToCharts(clinicName, patientId) {
 // ============================================================================
 
 async function checkPatientExists() {
+  sendStatus(`🔍 Checking if patient exists...`);
   await sleep(1500); // Wait for page to load
 
   // Wait for any loading spinners to disappear (max 30 seconds)
   const spinnerSelector = 'i.icon-spinner.text-muted.icon-spin';
   const startTime = Date.now();
-  const maxWait = 30000;
+  const maxWait = 10000;
 
   while (document.querySelector(spinnerSelector)) {
     if (Date.now() - startTime > maxWait) {
+      sendStatus(`⚠️ Patient check timed out (spinner still visible)`, 'warning');
       return false; // Spinner never went away, patient probably doesn't exist
     }
     await sleep(500);
@@ -336,11 +416,20 @@ async function checkPatientExists() {
 
   // Check for error messages
   const errorElement = document.querySelector('.alert-danger, .error-message');
-  if (errorElement) return false;
+  if (errorElement) {
+    sendStatus(`⚠️ Patient not found (error message detected)`, 'error');
+    return false;
+  }
 
   // Check if patient name is visible
   const nameElement = document.querySelector('.row .col-xs-10.col-sm-11 .sensitive.text-selectable');
-  return !!nameElement;
+  const exists = !!nameElement;
+  if (exists) {
+    sendStatus(`✓ Patient found`);
+  } else {
+    sendStatus(`⚠️ Patient not found (no name element)`, 'error');
+  }
+  return exists;
 }
 
 async function getPatientName() {
@@ -407,7 +496,7 @@ async function getChartEntries() {
 // PDF DOWNLOAD FUNCTIONS
 // ============================================================================
 
-async function downloadPdfWithCookies(pdfUrl, filename, patientName) {
+async function downloadPdfWithCookies(pdfUrl, filename, patientName, patientId) {
   try {
     // Fetch the PDF from the server
     sendStatus(`⬇️ Fetching PDF...`);
@@ -444,13 +533,14 @@ async function downloadPdfWithCookies(pdfUrl, filename, patientName) {
 
     const blobUrl = URL.createObjectURL(blob);
     const cleanPatient = patientName.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
+    const patientFolder = `jane-scraper/${patientId}_${cleanPatient}`;
 
-    // Download to jane-scraper folder with patient name prefix
+    // Download directly into per-patient folder
     const downloadId = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         action: 'downloadPDF',
         url: blobUrl,
-        filename: `jane-scraper/${cleanPatient}__${filename}`,
+        filename: `${patientFolder}/${filename}`,
         saveAs: false
       }, (response) => {
         if (chrome.runtime.lastError) {
@@ -506,20 +596,22 @@ async function downloadPdfWithCookies(pdfUrl, filename, patientName) {
       throw new Error('Download timed out');
     }
 
-    // Store the download ID for later cleanup
+    // Track for potential future needs (no cleanup now that we skip zipping)
     currentPatientDownloadIds.push(downloadId);
-
-    // Also save to database in case we need to resume
-    try {
-      await saveFileToDatabase(patientName, filename, blob, downloadId);
-    } catch (e) {
-      console.warn('IndexedDB save failed', e);
-    }
+    try { await saveFileToDatabase(patientName, filename, blob, downloadId); } catch (e) { console.warn('IndexedDB save failed', e); }
 
     return true;
 
   } catch (error) {
-    throw error;
+    // Attempt recovery for PDF failures by scheduling a resume
+    try {
+      const clinicName = getClinicNameFromUrl();
+      await scheduleRecovery(clinicName, await chrome.storage.local.get(getStorageKey('scrapingState')).then(r => r[getStorageKey('scrapingState')]));
+      // Note: scheduleRecovery will navigate; stop current flow
+      return false;
+    } catch (_) {
+      throw error;
+    }
   }
 }
 
@@ -527,191 +619,15 @@ async function downloadPdfWithCookies(pdfUrl, filename, patientName) {
 // ZIP CREATION FUNCTIONS
 // ============================================================================
 
+// Removed zipping; kept function name block for minimal diff but make it a no-op
 async function zipPatientFiles(patientName, patientId) {
-  // Get files from database (in case of page reloads)
-  let filesToZip = [];
-  let downloadIdsToDelete = [];
-
+  // No-op: direct-to-folder saving eliminates need for zipping or cleanup
   try {
-    const persistedFiles = await getFilesFromDatabase(patientName);
-    if (persistedFiles && persistedFiles.length > 0) {
-      filesToZip = persistedFiles;
-      downloadIdsToDelete = persistedFiles.map(f => f.downloadId).filter(id => id != null);
-    }
-  } catch (e) {
-    console.warn('IndexedDB list failed', e);
-  }
-
-  // Fall back to in-memory files if database is empty
-  if (filesToZip.length === 0 && currentPatientFiles.length > 0) {
-    filesToZip = currentPatientFiles;
-    downloadIdsToDelete = currentPatientDownloadIds;
-  }
-
-  // Nothing to zip
-  if (filesToZip.length === 0) {
-    return;
-  }
-
-  try {
-    sendStatus(`📦 Creating zip file for ${patientName} (${filesToZip.length} files)...`);
-
-    // Create a new zip file
-    const zip = new JSZip();
-
-    // Add all PDFs to the zip
-    for (const file of filesToZip) {
-      zip.file(file.filename, file.blob);
-    }
-
-    // Generate the zip blob
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
-
-    // Download the zip file
-    const blobUrl = URL.createObjectURL(zipBlob);
-    const cleanPatient = patientName.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
-    const zipFilename = `jane-scraper/${cleanPatient}__PID${patientId}.zip`;
-
-    const downloadId = await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: 'downloadPDF',
-        url: blobUrl,
-        filename: zipFilename,
-        saveAs: false
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (response.error) {
-          reject(new Error(response.error));
-        } else {
-          resolve(response.downloadId);
-        }
-      });
-    });
-
-    // Wait for zip download to complete
-    let downloadComplete = false;
-    let attempts = 0;
-    const maxAttempts = 60;
-
-    while (!downloadComplete && attempts < maxAttempts) {
-      if (shouldStop) {
-        URL.revokeObjectURL(blobUrl);
-        throw new Error('Stopped');
-      }
-
-      const result = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({
-          action: 'checkDownload',
-          downloadId: downloadId
-        }, (response) => {
-          resolve(response.state);
-        });
-      });
-
-      if (result === 'complete') {
-        downloadComplete = true;
-      } else if (result === 'interrupted') {
-        URL.revokeObjectURL(blobUrl);
-        throw new Error('Zip download interrupted');
-      }
-
-      if (!downloadComplete) {
-        await sleep(500);
-        attempts++;
-      }
-    }
-
-    URL.revokeObjectURL(blobUrl);
-
-    if (!downloadComplete) {
-      throw new Error('Zip download timed out');
-    }
-
-    sendStatus(`✅ Zip created: ${cleanPatient}__PID${patientId}.zip (${filesToZip.length} files)`, 'success');
-
-    // Delete the individual PDF files
-    if (downloadIdsToDelete.length > 0) {
-      try {
-        sendStatus(`🗑️ Cleaning up ${downloadIdsToDelete.length} individual files...`);
-
-        await sleep(1000); // Wait a bit to ensure downloads are complete
-
-        let deletedCount = 0;
-        let failedCount = 0;
-
-        for (const downloadId of downloadIdsToDelete) {
-          try {
-            // Check if download is complete before deleting
-            const downloadState = await new Promise((resolve) => {
-              chrome.runtime.sendMessage({
-                action: 'checkDownload',
-                downloadId: downloadId
-              }, (response) => {
-                resolve(response?.state || 'unknown');
-              });
-            });
-
-            if (downloadState !== 'complete') {
-              console.warn(`Download ${downloadId} not complete (${downloadState}), skipping`);
-              failedCount++;
-              continue;
-            }
-
-            // Delete the file
-            await new Promise((resolve, reject) => {
-              chrome.runtime.sendMessage({
-                action: 'deleteFile',
-                downloadId: downloadId
-              }, (response) => {
-                if (chrome.runtime.lastError) {
-                  reject(new Error(chrome.runtime.lastError.message));
-                } else if (response?.error) {
-                  reject(new Error(response.error));
-                } else {
-                  resolve();
-                }
-              });
-            });
-
-            deletedCount++;
-            await sleep(50); // Small delay between deletes
-
-          } catch (err) {
-            console.warn(`Failed to delete file ${downloadId}:`, err);
-            failedCount++;
-          }
-        }
-
-        if (deletedCount > 0) {
-          const message = failedCount > 0
-            ? `✅ Cleaned up ${deletedCount} files (${failedCount} failed)`
-            : `✅ Cleaned up ${deletedCount} files`;
-          sendStatus(message, 'success');
-        } else if (failedCount > 0) {
-          sendStatus(`⚠️ Failed to clean up ${failedCount} files`, 'error');
-        }
-
-      } catch (err) {
-        console.warn('Cleanup failed', err);
-        sendStatus(`⚠️ Could not clean up individual files`, 'error');
-      }
-    }
-
-    // Clear everything for the next patient
+    // Reset buffers for next patient to avoid memory growth
     currentPatientFiles = [];
     currentPatientDownloadIds = [];
-
-    try {
-      await clearDatabaseForPatient(patientName);
-    } catch (e) {
-      console.warn('IndexedDB clear failed', e);
-    }
-
-  } catch (error) {
-    sendStatus(`❌ Zip creation error: ${error.message}`, 'error');
-    throw error;
-  }
+    try { await clearDatabaseForPatient(patientName); } catch (e) { console.warn('IndexedDB clear failed', e); }
+  } catch (_) {}
 }
 
 // ============================================================================
@@ -719,6 +635,9 @@ async function zipPatientFiles(patientName, patientId) {
 // ============================================================================
 
 async function initiateChartDownload(clinicName, patientId, chartEntryId, headerText, patientName, remainingEntries, totalCharts) {
+  const currentChartNum = totalCharts - remainingEntries.length;
+  sendStatus(`🔄 [Chart ${currentChartNum}/${totalCharts}] Navigating to chart entry ${chartEntryId}...`);
+  
   // Save state before navigating to chart entry page
   await chrome.storage.local.set({
     [getStorageKey('scrapingState')]: {
@@ -801,7 +720,7 @@ async function handleChartDownload(state) {
       const filename = `${cleanHeader}__${chartEntryId}.pdf`;
 
       // Download the PDF
-      await downloadPdfWithCookies(pdfUrl, filename, patientName);
+      await downloadPdfWithCookies(pdfUrl, filename, patientName, patientId);
 
       if (shouldStop) {
         await chrome.storage.local.remove([getStorageKey('scrapingState')]);
@@ -842,46 +761,31 @@ async function handleChartDownload(state) {
           return;
         }
 
-        sendStatus(`✅ Completed patient ${patientId} - creating zip...`);
-
-        await zipPatientFiles(patientName, patientId);
+        sendStatus(`✅ Completed patient ${patientId} - files saved to folder`, 'success');
 
         if (shouldStop) {
           sendStatus('⏹️ Scraping stopped', 'info');
           return;
         }
 
-        if (threadMode) {
-          try {
-            const cleanPatient = patientName.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
-            const zipFilename = `jane-scraper/${cleanPatient}__PID${patientId}.zip`;
-            chrome.runtime.sendMessage({ action: 'completeWork', threadId, patientId, patientName, zipFilename, success: true });
-          } catch (_) {}
+        // Mark work complete and request next patient
+        sendStatus(`✅ Completed patient ${patientId}`);
 
-          // Save state to request new work after navigation
-          await chrome.storage.local.set({
-            [getStorageKey('scrapingState')]: {
-              action: 'requestWork',
-              clinicName
-            }
-          });
+        try {
+          const cleanPatient = patientName.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
+          const zipFilename = `jane-scraper/${patientId}_${cleanPatient}.zip`;
+          chrome.runtime.sendMessage({ action: 'completeWork', threadId, patientId, patientName, zipFilename, success: true });
+        } catch (_) {}
 
-          await sleep(1000);
-          window.location.href = `https://${clinicName}.janeapp.com/admin#schedule`;
-        } else {
-          // Save state to continue with next patient
-          await chrome.storage.local.set({
-            [getStorageKey('scrapingState')]: {
-              action: 'continuePatients',
-              clinicName,
-              nextPatientId: patientId + 1,
-              consecutiveNotFound: 0
-            }
-          });
-          // Navigate back to continue
-          await sleep(1000);
-          window.location.href = `https://${clinicName}.janeapp.com/admin#schedule`;
-        }
+        await chrome.storage.local.set({
+          [getStorageKey('scrapingState')]: {
+            action: 'requestWork',
+            clinicName
+          }
+        });
+
+        await sleep(1000);
+        window.location.href = `https://${clinicName}.janeapp.com/admin#schedule`;
       }
 
       return;
@@ -931,8 +835,24 @@ async function handleChartDownload(state) {
 
   } catch (error) {
     sendStatus(`❌ Error: ${error.message}`, 'error');
-    chrome.storage.local.remove([getStorageKey('scrapingState')]);
-    throw error;
+    try {
+      const clinic = state?.clinicName || getClinicNameFromUrl();
+      await scheduleRecovery(clinic, {
+        action: 'downloadChart',
+        clinicName: state?.clinicName,
+        patientId: state?.patientId,
+        chartEntryId: state?.chartEntryId,
+        headerText: state?.headerText,
+        patientName: state?.patientName,
+        remainingEntries: state?.remainingEntries,
+        totalCharts: state?.totalCharts
+      });
+      return;
+    } catch (_) {
+      // As a last resort, clear state
+      await chrome.storage.local.remove([getStorageKey('scrapingState')]);
+      throw error;
+    }
   }
 }
 
@@ -942,84 +862,41 @@ async function handleChartDownload(state) {
 //
 // HOW THREADING WORKS:
 //
-// SINGLE-THREADED MODE:
-// - continueScrapingFromPatient() loops through patient IDs (1, 2, 3, ...)
-// - Each patient: check exists → download charts → zip → move to next
-// - Stops after MAX_CONSECUTIVE_NOT_FOUND missing patients
-//
-// MULTI-THREADED MODE (threadMode=true):
+// ALL runs use the threading system now (even single thread).
 // - Each tab is assigned a threadId (T1, T2, etc.)
 // - Tabs request work from background.js coordinator
 // - Coordinator assigns next available patient ID and locks it
 // - Tab processes ONE patient, then requests new work
 // - No local looping - coordinator decides what to process next
 //
+// Single thread (numThreads=1) = one tab requesting work
+// Multiple threads (numThreads=2) = two tabs requesting work simultaneously
+//
 // ============================================================================
 
 async function handlePostLogin(state) {
-  const { clinicName, startingIndex } = state;
+  const { clinicName } = state;
 
   await chrome.storage.local.remove([getStorageKey('scrapingState')]);
-  await sleep(5000); // Extra time for post-login page load
+  await sleep(3000);
 
-  // Verify we're logged in
-  if (window.location.href.includes('/admin#schedule') || window.location.href.includes('/admin#patients')) {
-    sendStatus('✅ Login successful! Starting scrape...');
-
-    // In thread mode, request work from coordinator
-    if (threadMode) {
-      sendStatus(`🔄 [${threadId}] Requesting first assignment...`);
-      await sleep(1000);
-      await requestNextWork(clinicName);
-    } else {
-      // Single-threaded mode: start looping through patients
-      await continueScrapingFromPatient(clinicName, startingIndex, 0);
-    }
+  // Consider login successful if we're on any admin page with the app shell loaded
+  const adminLoaded = window.location.href.includes('/admin');
+  const hasAppShell = !!document.querySelector('#ember-basic-dropdown-wormhole, header, nav');
+  if (adminLoaded && hasAppShell) {
+    sendStatus(`✅ Login successful`, 'success');
+    await requestNextWork(clinicName);
   } else {
-    sendStatus('❌ Login may have failed', 'error');
+    sendStatus(`❌ Login failed`, 'error');
   }
 }
 
-async function continuePatientScraping(state) {
-  const { clinicName, nextPatientId, consecutiveNotFound } = state;
-
-  await chrome.storage.local.remove([getStorageKey('scrapingState')]);
-
-  await continueScrapingFromPatient(clinicName, nextPatientId, consecutiveNotFound);
-}
-
-async function continueScrapingFromPatient(clinicName, startPatientId, initialConsecutiveNotFound = 0) {
+async function continueScrapingFromPatient(clinicName, patientId) {
   try {
-    currentPatientId = startPatientId;
-    let consecutiveNotFound = initialConsecutiveNotFound;
+    currentPatientId = patientId;
 
-    // THREAD MODE: Process ONE patient, then request new work
-    if (threadMode) {
-      await processOnePatient(clinicName, currentPatientId, consecutiveNotFound);
-      return;
-    }
-
-    // SINGLE-THREADED MODE: Loop through patients
-    while (!shouldStop && consecutiveNotFound < MAX_CONSECUTIVE_NOT_FOUND) {
-      if (shouldStop) break;
-
-      const result = await processOnePatient(clinicName, currentPatientId, consecutiveNotFound);
-
-      if (result.stopped) break;
-      if (result.downloaded) return; // Will continue after navigation
-
-      consecutiveNotFound = result.consecutiveNotFound;
-      currentPatientId = result.nextPatientId;
-
-      await sleep(500);
-    }
-
-    // Finished scraping
-    if (consecutiveNotFound >= MAX_CONSECUTIVE_NOT_FOUND) {
-      sendStatus(`✅ Found ${MAX_CONSECUTIVE_NOT_FOUND} consecutive missing patients. Scraping complete!`, 'success');
-    } else if (shouldStop) {
-      sendStatus('⏹️ Scraping stopped by user', 'info');
-    }
+    // Process ONE patient, then request new work from coordinator
+    await processOnePatient(clinicName, patientId);
 
   } catch (error) {
     if (error.message === 'Stopped' || shouldStop) {
@@ -1030,88 +907,67 @@ async function continueScrapingFromPatient(clinicName, startPatientId, initialCo
   }
 }
 
-// Process a single patient (used by both thread and single-threaded modes)
-//
-// Returns object with:
-//   - stopped: true if user clicked stop or thread requested new work
-//   - downloaded: true if started chart downloads (will continue after navigation)
-//   - consecutiveNotFound: updated counter
-//   - nextPatientId: next patient to process (single-threaded only)
-//
-async function processOnePatient(clinicName, patientId, consecutiveNotFound) {
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+// Process a single patient
+async function processOnePatient(clinicName, patientId) {
+  if (shouldStop) return;
 
   sendStatus(`📋 Processing patient ${patientId}...`);
 
   // Navigate to patient details page
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
   await navigateToPatient(clinicName, patientId);
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
 
   // Check if patient exists
   const patientExists = await checkPatientExists();
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
 
   if (!patientExists) {
-    consecutiveNotFound++;
-    sendStatus(`⚠️ Patient ${patientId} not found (${consecutiveNotFound}/${MAX_CONSECUTIVE_NOT_FOUND})`);
+    sendStatus(`⚠️ Patient ${patientId} not found`);
 
-    if (threadMode) {
-      // Thread mode: Tell coordinator to unlock this patient, then request new work
-      try {
-        await new Promise((resolve) => {
-          chrome.runtime.sendMessage({ action: 'patientNotFound', threadId, patientId }, resolve);
-        });
-      } catch (_) {}
-      await requestNextWork(clinicName);
-      return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
-    }
-
-    // Single-threaded: Move to next patient
-    return { stopped: false, consecutiveNotFound, nextPatientId: patientId + 1 };
+    // Tell coordinator to unlock this patient, then request new work
+    try {
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'patientNotFound', threadId, patientId }, resolve);
+      });
+    } catch (_) {}
+    await requestNextWork(clinicName);
+    return;
   }
 
-  // Patient exists - reset counter
-  consecutiveNotFound = 0;
-
   // Get patient name
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
   const patientName = await getPatientName();
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
 
   sendStatus(`👤 Patient ${patientId}: ${patientName}`);
 
   // Navigate to charts page
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
   await navigateToCharts(clinicName, patientId);
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
 
   // Check if patient has charts
   const hasCharts = await checkChartsExist();
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
 
   if (!hasCharts) {
     sendStatus(`ℹ️ Patient ${patientId} has no charts, skipping`);
 
-    if (threadMode) {
-      // Thread mode: Tell coordinator to unlock this patient, then request new work
-      try {
-        await new Promise((resolve) => {
-          chrome.runtime.sendMessage({ action: 'patientNoCharts', threadId, patientId }, resolve);
-        });
-      } catch (_) {}
-      await requestNextWork(clinicName);
-      return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
-    }
-
-    // Single-threaded: Move to next patient
-    return { stopped: false, consecutiveNotFound, nextPatientId: patientId + 1 };
+    // Tell coordinator to unlock this patient, then request new work
+    try {
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'patientNoCharts', threadId, patientId }, resolve);
+      });
+    } catch (_) {}
+    await requestNextWork(clinicName);
+    return;
   }
 
   // Get all chart entries
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
   const chartEntries = await getChartEntries();
-  if (shouldStop) return { stopped: true, consecutiveNotFound, nextPatientId: patientId };
+  if (shouldStop) return;
 
   sendStatus(`📄 Found ${chartEntries.length} chart entries for patient ${patientId}`);
 
@@ -1123,45 +979,40 @@ async function processOnePatient(clinicName, patientId, consecutiveNotFound) {
 
     sendStatus(`⬇️ Downloading chart ${firstEntry.index + 1}/${totalCharts}: ${firstEntry.headerText}`);
     await initiateChartDownload(clinicName, patientId, firstEntry.chartEntryId, firstEntry.headerText, patientName, remainingEntries, totalCharts);
-    return { stopped: false, downloaded: true, consecutiveNotFound, nextPatientId: patientId };
+    return;
   }
 
   // No charts - shouldn't reach here since hasCharts checked above
   sendStatus(`✅ Completed patient ${patientId}`);
-  return { stopped: false, consecutiveNotFound, nextPatientId: patientId + 1 };
 }
 
-// Request next work from coordinator (thread mode only)
+// Request next work from coordinator
 //
-// This is the key function that prevents duplicate work in multi-threaded mode.
+// This is the key function that prevents duplicate work.
 // It asks background.js for the next available patient ID.
 // Background.js maintains locks to ensure no two threads work on the same patient.
 //
 async function requestNextWork(clinicName) {
-  if (!threadMode) return;
-
-  sendStatus(`🔄 [${threadId}] Requesting next assignment...`);
   await sleep(1000);
 
   try {
     chrome.runtime.sendMessage({ action: 'requestWork', threadId }, async (resp) => {
       if (resp && resp.status === 'assigned' && resp.patientId) {
-        sendStatus(`📋 [${threadId}] Assigned patient ${resp.patientId}`);
+        sendStatus(`📋 Assigned patient ${resp.patientId}`, 'success');
         await sleep(500);
-        // Process this ONE patient (processOnePatient will call requestNextWork again when done)
-        await continueScrapingFromPatient(resp.clinicName || clinicName, resp.patientId, 0);
+        await continueScrapingFromPatient(resp.clinicName || clinicName, resp.patientId);
       } else if (resp && resp.status === 'done') {
-        sendStatus(`✅ [${threadId}] No more work available`, 'success');
+        sendStatus(`✅ No more work available`, 'success');
       } else {
-        sendStatus(`⚠️ [${threadId}] Unexpected response: ${JSON.stringify(resp)}`, 'error');
+        sendStatus(`⚠️ Unexpected response: ${JSON.stringify(resp)}`, 'error');
       }
     });
   } catch (e) {
-    sendStatus(`❌ [${threadId}] Failed to request work: ${e.message}`, 'error');
+    sendStatus(`❌ Failed to request work: ${e.message}`, 'error');
   }
 }
 
-async function startScraping(clinicName, email, password, startingIndex = STARTING_INDEX) {
+async function startScraping(clinicName, email, password) {
   try {
     // Reset stop flag
     shouldStop = false;
@@ -1169,27 +1020,17 @@ async function startScraping(clinicName, email, password, startingIndex = STARTI
 
     sendStatus('🚀 Starting scraping process...');
 
-    await sleep(500);
-
-    // Check if already logged in
-    if (window.location.href.includes('/admin#schedule') || window.location.href.includes('/admin#patients')) {
-      sendStatus('✅ Already logged in, starting scrape...');
-      await continueScrapingFromPatient(clinicName, startingIndex, 0);
-      return;
-    }
-
     // Save state before login (login causes page reload)
     await chrome.storage.local.set({
       [getStorageKey('scrapingState')]: {
         action: 'postLogin',
         clinicName,
         email,
-        password,
-        startingIndex
+        password
       }
     });
 
-    // Login
+    // Login (this will cause page reload)
     const loggedIn = await login(email, password);
 
     if (!loggedIn || shouldStop) {
@@ -1214,14 +1055,24 @@ async function startScraping(clinicName, email, password, startingIndex = STARTI
 // EVENT LISTENERS
 // ============================================================================
 
-// Listen for page loads to resume scraping (thread-aware)
+// Listen for page loads to resume scraping
 chrome.storage.local.get(null, async (result) => {
-  // Figure out if this tab is a thread worker first
+  // Early global freeze detection only when we're in an active scraping lifecycle
+  // i.e., we have a scoped scraping state saved for this thread
+  try {
+    if (result && result[getStorageKey('scrapingState')]) {
+      if (document.readyState === 'loading') {
+        await new Promise(r => document.addEventListener('DOMContentLoaded', r));
+      }
+      await sleep(200);
+      await detectAndHandleRateLimit();
+    }
+  } catch (_) {}
+  // Get thread ID for this tab
   try {
     await new Promise((resolve) => {
       chrome.runtime.sendMessage({ action: 'getThreadAssignment' }, (resp) => {
         if (resp && resp.ok && resp.threadId) {
-          threadMode = true;
           threadId = resp.threadId;
         }
         resolve();
@@ -1229,61 +1080,74 @@ chrome.storage.local.get(null, async (result) => {
     });
   } catch (_) {}
 
-  // If we're a thread tab, ignore any non-thread leftover state
-  const scopedState = result[getStorageKey('scrapingState')];
-  const globalState = result['scrapingState'];
-
-  if (threadMode && globalState) {
-    // hard-ignore old global state to avoid rogue resumes
-    await chrome.storage.local.remove(['scrapingState']);
-  }
-
+  // Check for stop request
   if (result.stopRequested || shouldStop) {
-    chrome.storage.local.remove(['stopRequested', getStorageKey('scrapingState'), getStorageKey('credentials')]);
+    chrome.storage.local.remove(['stopRequested', getStorageKey('scrapingState')]);
     sendStatus('⏹️ Scraping stopped', 'info');
     return;
   }
 
-  if (scopedState) {
-    // only resume thread-scoped state in thread mode
-    if (document.readyState === 'loading') {
-      await new Promise(r => document.addEventListener('DOMContentLoaded', r));
-    }
-    await sleep(500);
-    if (scopedState.action === 'downloadChart') return await handleChartDownload(scopedState);
-    if (scopedState.action === 'continuePatients') return await continuePatientScraping(scopedState);
-    if (scopedState.action === 'postLogin') return await handlePostLogin(scopedState);
-    if (scopedState.action === 'requestWork') {
-      // Thread mode: request next work from coordinator
+  // Resume from saved state if exists
+  const scopedState = result[getStorageKey('scrapingState')];
+  if (!scopedState) return;
+
+  if (document.readyState === 'loading') {
+    await new Promise(r => document.addEventListener('DOMContentLoaded', r));
+  }
+  await sleep(500);
+
+  // Handle different state actions
+  if (scopedState.action === 'downloadChart') {
+    return await handleChartDownload(scopedState);
+  }
+
+  if (scopedState.action === 'postLogin') {
+    return await handlePostLogin(scopedState);
+  }
+
+  if (scopedState.action === 'requestWork') {
+    await chrome.storage.local.remove([getStorageKey('scrapingState')]);
+    return await requestNextWork(scopedState.clinicName);
+  }
+
+  if (scopedState.action === 'recover') {
+    const { clinicName, resumeState, phase } = scopedState;
+    const patientId = resumeState?.patientId || currentPatientId;
+
+    if (!patientId) {
+      sendStatus(`❌ Recovery failed`, 'error');
       await chrome.storage.local.remove([getStorageKey('scrapingState')]);
-      return await requestNextWork(scopedState.clinicName);
+      return;
     }
-    return;
-  }
 
-  // In thread mode on admin pages, request work
-  if (threadMode && (location.href.includes('/admin#schedule') || location.href.includes('/admin#patients'))) {
-    await sleep(2000);
-    try {
-      chrome.runtime.sendMessage({ action: 'requestWork', threadId }, async (resp) => {
-        if (resp && resp.status === 'assigned' && resp.patientId) {
-          await sleep(500);
-          await continueScrapingFromPatient(resp.clinicName || '', resp.patientId, 0);
-        }
+    if (phase === 'toSchedule') {
+      await chrome.storage.local.set({
+        [getStorageKey('scrapingState')]: { action: 'recover', clinicName, resumeState, phase: 'toCharts' }
       });
-    } catch (_) {}
-    return;
-  }
-
-  // Non-thread single-run path (only if credentials exist)
-  if (!threadMode && result.credentials) {
-    const { clinicName, email, password } = result.credentials;
-    await chrome.storage.local.remove(['credentials']);
-    if (document.readyState === 'loading') {
-      await new Promise(r => document.addEventListener('DOMContentLoaded', r));
+      await navigateToPatient(clinicName, patientId);
+      await sleep(500);
+      await navigateToCharts(clinicName, patientId);
+      return;
     }
-    await sleep(500);
-    await startScraping(clinicName, email, password, STARTING_INDEX);
+
+    if (phase === 'toCharts') {
+      await chrome.storage.local.remove([getStorageKey('scrapingState')]);
+      // Prefer any best-effort recover hint if present
+      try {
+        const hint = await chrome.storage.local.get(threadId + '_recoverHint');
+        if (hint && hint[threadId + '_recoverHint']) {
+          await chrome.storage.local.remove(threadId + '_recoverHint');
+          if (hint[threadId + '_recoverHint'].action === 'downloadChart') {
+            return await handleChartDownload(hint[threadId + '_recoverHint']);
+          }
+        }
+      } catch (_) {}
+
+      if (resumeState?.action === 'downloadChart') {
+        return await handleChartDownload(resumeState);
+      }
+      return await continueScrapingFromPatient(clinicName, patientId);
+    }
   }
 });
 
@@ -1300,33 +1164,78 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     sendResponse({ success: true });
   } else if (request.action === 'initThread') {
-    // Initialize this tab as a worker; optionally delay login to avoid simultaneous sign-ins
-    threadMode = true;
     threadId = request.threadId;
     const loginDelayMs = request.loginDelayMs || 0;
-    (async () => {
-      const clinicName = request.clinicName;
-      const email = request.email;
-      const password = request.password;
-      await sleep(loginDelayMs);
 
-      // If not logged in, perform login; otherwise request work
-      if (!window.location.href.includes('/admin#schedule') && !window.location.href.includes('/admin#patients')) {
-        await startScraping(clinicName, email, password, STARTING_INDEX);
-        return;
+    sendResponse({ ok: true, threadId });
+
+    (async () => {
+      const { clinicName, email, password } = request;
+
+      if (loginDelayMs > 0) {
+        await sleep(loginDelayMs);
       }
-      await sleep(2000); // Wait for page to fully load
-      try {
-        chrome.runtime.sendMessage({ action: 'requestWork', threadId }, async (resp) => {
-          if (resp && resp.status === 'assigned' && resp.patientId) {
-            await sleep(500);
-            await continueScrapingFromPatient(clinicName, resp.patientId, 0);
-          }
-        });
-      } catch (_) {}
+
+      sendStatus(`🚀 Starting...`);
+
+      // Ensure DOM is ready before deciding login state
+      if (document.readyState === 'loading') {
+        await new Promise(r => document.addEventListener('DOMContentLoaded', r));
+      }
+      await sleep(500);
+
+      const loginFormPresent = !!document.querySelector('input[name="auth_key"], input#auth_key');
+      const onAdminHash = window.location.href.includes('/admin#');
+
+      // If login form is visible OR we are not on an authenticated admin hash, perform login
+      if (loginFormPresent || !onAdminHash) {
+        await startScraping(clinicName, email, password);
+      } else {
+        // Logged in: request work
+        await sleep(1000);
+        await requestNextWork(clinicName);
+      }
     })();
+    return true;
+  } else if (request.action === 'clearStopAndResume') {
+    // Clear stop flag and resume best-effort from recover hint or request work
+    shouldStop = false;
+    cancelAllTimeouts();
+    try { chrome.storage.local.remove(['stopRequested']); } catch (_) {}
+
+    sendResponse({ ok: true });
+
+    (async () => {
+      try {
+        const clinicName = request.clinicName || getClinicNameFromUrl();
+        const hintKey = threadId ? (threadId + '_recoverHint') : null;
+        let hint = null;
+        if (hintKey) {
+          try {
+            const obj = await chrome.storage.local.get(hintKey);
+            hint = obj && obj[hintKey] ? obj[hintKey] : null;
+          } catch (_) {}
+        }
+
+        if (hint && hint.action === 'downloadChart' && hint.patientId) {
+          // Navigate to patient and charts, then continue the download flow
+          await navigateToPatient(clinicName, hint.patientId);
+          await sleep(500);
+          await navigateToCharts(clinicName, hint.patientId);
+
+          // Proceed with the original download state
+          await handleChartDownload(hint);
+          return;
+        }
+
+        // Fallback: request next work
+        await requestNextWork(clinicName);
+      } catch (e) {
+        sendStatus('❌ Resume failed: ' + (e?.message || String(e)), 'error');
+      }
+    })();
+    return true;
   }
-  return true;
 });
 
 console.log('Jane Scraper loaded');

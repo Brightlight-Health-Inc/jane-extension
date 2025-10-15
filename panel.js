@@ -14,15 +14,59 @@
 
 // DOM element references
 const startBtn = document.getElementById('start-btn');
-const startMtBtn = document.getElementById('start-mt-btn');
 const stopBtn = document.getElementById('stop-btn');
 const statusMessages = document.getElementById('status-messages');
 const statusCount = document.getElementById('status-count');
 const formSection = document.getElementById('form-section');
 const statusContainer = document.getElementById('status-container');
+// Stats elements
+const statsPdfs = document.getElementById('stats-pdfs');
+const statsUsers = document.getElementById('stats-users');
+const statsElapsed = document.getElementById('stats-elapsed');
+const statsAvgUser = document.getElementById('stats-avg-user');
+const statsAvgPdf = document.getElementById('stats-avg-pdf');
 
 // Message history
 let messageCount = 1; // Start at 1 for the initial "Ready" message
+
+// Stats state
+let runStartTime = null;
+let pdfCount = 0;
+let userCount = 0;
+let userStartTime = null;
+let totalUserDurationMs = 0;
+let totalPdfDurationMs = 0;
+let lastPdfTime = null;
+
+function formatDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function resetStats() {
+  runStartTime = Date.now();
+  pdfCount = 0;
+  userCount = 0;
+  userStartTime = null;
+  totalUserDurationMs = 0;
+  totalPdfDurationMs = 0;
+  lastPdfTime = null;
+  statsPdfs.textContent = '0';
+  statsUsers.textContent = '0';
+  statsElapsed.textContent = '00:00:00';
+  statsAvgUser.textContent = '-';
+  statsAvgPdf.textContent = '-';
+}
+
+function tickElapsed() {
+  if (!runStartTime) return;
+  statsElapsed.textContent = formatDuration(Date.now() - runStartTime);
+}
+
+setInterval(tickElapsed, 1000);
 
 /**
  * Updates the status message displayed in the side panel
@@ -66,18 +110,24 @@ function updateStatus(message, type = 'info') {
 
 /**
  * Handles the Start button click event
- * 
- * Validates the form fields, saves credentials to Chrome storage,
- * navigates the active tab to Jane App, and shows the status container.
- * The content script will automatically start scraping when it loads.
+ *
+ * Validates form fields and starts scraping with specified number of threads.
+ * - If thread count = 1: Works like single-threaded mode
+ * - If thread count > 1: Creates multiple tabs coordinated by background.js
  */
 startBtn.addEventListener('click', async () => {
   const clinicName = document.getElementById('clinic-name').value.trim();
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value.trim();
+  const threadCount = parseInt(document.getElementById('thread-count').value, 10);
 
   if (!clinicName || !email || !password) {
     updateStatus('Please fill in all fields', 'error');
+    return;
+  }
+
+  if (!threadCount || threadCount < 1 || threadCount > 8) {
+    updateStatus('Thread count must be between 1 and 8', 'error');
     return;
   }
 
@@ -88,60 +138,31 @@ startBtn.addEventListener('click', async () => {
   // Show stop button, hide start button
   startBtn.style.display = 'none';
   stopBtn.style.display = 'block';
+  stopBtn.disabled = false;
 
-  updateStatus('Starting...');
+  // Reset stats for new run
+  resetStats();
 
-  // Get active tab and navigate to Jane App
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const targetUrl = `https://${clinicName}.janeapp.com/admin`;
+  updateStatus(`Starting with ${threadCount} thread${threadCount > 1 ? 's' : ''}...`);
 
-  // Navigate the tab to Jane App
-  await chrome.tabs.update(tab.id, { url: targetUrl });
-
-  // Save credentials for content script
-  await chrome.storage.local.set({
-    credentials: { clinicName, email, password }
-  });
-
-  updateStatus('Navigating to Jane App...');
-});
-
-// Start Multi-Thread button
-startMtBtn.addEventListener('click', async () => {
-  const clinicName = document.getElementById('clinic-name').value.trim();
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value.trim();
-
-  if (!clinicName || !email || !password) {
-    updateStatus('Please fill in all fields', 'error');
-    return;
-  }
-
-  formSection.classList.add('hidden');
-  statusContainer.classList.add('expanded');
-  startBtn.style.display = 'none';
-  startMtBtn.style.display = 'none';
-  stopBtn.style.display = 'block';
-  updateStatus('Starting multi-threaded scraping (2 tabs)...');
-
-  // Ask background to start N threads and coordinate work
+  // Start threads via background coordinator
   chrome.runtime.sendMessage({
     action: 'startThreads',
     clinicName,
     email,
     password,
     startingIndex: 1,
-    numThreads: 2,
-    resume: false  // start clean; set true only when resuming a run
+    numThreads: threadCount,
+    resume: false
   }, (resp) => {
     if (chrome.runtime.lastError) {
       updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
       return;
     }
     if (!resp || !resp.ok) {
-      updateStatus('❌ Could not start threads: ' + (resp?.error || 'unknown'), 'error');
+      updateStatus('❌ Could not start: ' + (resp?.error || 'unknown'), 'error');
     } else {
-      updateStatus('✅ Threads started');
+      updateStatus(`✅ ${threadCount} thread${threadCount > 1 ? 's' : ''} started`);
     }
   });
 });
@@ -154,24 +175,23 @@ startMtBtn.addEventListener('click', async () => {
  */
 stopBtn.addEventListener('click', async () => {
   updateStatus('Stopping scraping...', 'info');
-  stopBtn.disabled = true;
 
-  // Send stop message to content script
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  chrome.tabs.sendMessage(tab.id, { action: 'stopScraping' }, (response) => {
-    if (chrome.runtime.lastError) {
-      updateStatus('❌ Error stopping: ' + chrome.runtime.lastError.message, 'error');
-    } else {
-      updateStatus('⏹️ Scraping stopped', 'info');
+  // Request background to broadcast stop to all worker tabs
+  chrome.runtime.sendMessage({ action: 'broadcastStop' }, (resp) => {
+    if (!resp || resp.ok !== true) {
+      updateStatus('❌ Error stopping: ' + (resp?.error || chrome.runtime.lastError?.message || 'unknown'), 'error');
+      return;
     }
-
-    // Reset UI
-    stopBtn.style.display = 'none';
-    startBtn.style.display = 'block';
-    stopBtn.disabled = false;
-    formSection.classList.remove('hidden');
-    statusContainer.classList.remove('expanded');
+    updateStatus('⏹️ Stop signal sent to all workers', 'info');
   });
+});
+
+// Auto-stop if the side panel closes
+window.addEventListener('beforeunload', () => {
+  try {
+    chrome.storage.local.set({ stopRequested: true });
+    chrome.runtime.sendMessage({ action: 'broadcastStop' });
+  } catch (_) {}
 });
 
 /**
@@ -186,10 +206,44 @@ stopBtn.addEventListener('click', async () => {
  */
 chrome.runtime.onMessage.addListener((request) => {
   if (request.action === 'statusUpdate') {
-    updateStatus(request.status.message, request.status.type);
+    const msg = request.status.message || '';
+    updateStatus(msg, request.status.type);
 
-    // If scraping is complete, reset UI
-    if (request.status.message.includes('complete') || request.status.message.includes('stopped')) {
+    // Detect user start/end
+    if (msg.startsWith('📋 Processing patient ')) {
+      // starting a new user
+      userStartTime = Date.now();
+    }
+    if (msg.startsWith('✅ Completed patient ')) {
+      // finished current user
+      userCount += 1;
+      statsUsers.textContent = String(userCount);
+      if (userStartTime) {
+        totalUserDurationMs += (Date.now() - userStartTime);
+        userStartTime = null;
+      }
+    }
+
+    // Detect successful PDF download lines
+    if (msg.startsWith('✅ Downloaded: ')) {
+      pdfCount += 1;
+      statsPdfs.textContent = String(pdfCount);
+      if (lastPdfTime) totalPdfDurationMs += (Date.now() - lastPdfTime);
+      lastPdfTime = Date.now();
+    }
+
+    // Update averages
+    if (userCount > 0) {
+      statsAvgUser.textContent = formatDuration(Math.floor(totalUserDurationMs / userCount));
+    }
+    if (pdfCount > 0) {
+      statsAvgPdf.textContent = formatDuration(Math.floor(totalPdfDurationMs / pdfCount));
+    }
+
+    // Only reset UI on global done or explicit stopped
+    const isGlobalDone = msg.includes('No more work available');
+    const isExplicitStopped = msg.includes('Scraping stopped');
+    if (isGlobalDone || isExplicitStopped) {
       setTimeout(() => {
         stopBtn.style.display = 'none';
         startBtn.style.display = 'block';

@@ -4,6 +4,22 @@
   <meta charset="UTF-8">
   <title>Jane App Scraper</title>
   <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --muted: #6b7280;
+      --text: #1f2937;
+      --brand: #4CAF50;
+      --brand-600: #45a049;
+      --info: #2563eb;
+      --info-50: #eaf2ff;
+      --success: #16a34a;
+      --success-50: #e8f5e9;
+      --error: #dc2626;
+      --error-50: #ffebee;
+      --border: #e5e7eb;
+      --shadow: rgba(17, 24, 39, 0.08);
+    }
     * {
       margin: 0;
       padding: 0;
@@ -12,17 +28,18 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-      background: #f5f5f5;
+      background: linear-gradient(180deg, #f7fafc 0%, var(--bg) 100%);
       height: 100vh;
       display: flex;
       flex-direction: column;
+      color: var(--text);
     }
 
     .header {
-      background: #4CAF50;
+      background: linear-gradient(135deg, var(--brand) 0%, #66bb6a 100%);
       color: white;
       padding: 20px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      box-shadow: 0 8px 24px var(--shadow);
     }
 
     .header h1 {
@@ -42,6 +59,10 @@
       overflow-y: auto;
       display: flex;
       flex-direction: column;
+      gap: 14px;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
     }
 
     .form-section {
@@ -56,8 +77,17 @@
       padding: 0;
     }
 
-    .form-group {
-      margin-bottom: 20px;
+    .form-group { margin-bottom: 12px; }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    @media (min-width: 720px) {
+      .form-grid { grid-template-columns: 1fr 1fr; }
+      .col-span-2 { grid-column: span 2; }
     }
 
     .form-group label {
@@ -84,38 +114,39 @@
 
     .btn-primary {
       width: 100%;
-      padding: 12px;
-      background: #4CAF50;
+      padding: 12px 14px;
+      background: var(--brand);
       color: white;
       border: none;
-      border-radius: 6px;
+      border-radius: 10px;
       font-size: 15px;
-      font-weight: 600;
+      font-weight: 700;
+      letter-spacing: 0.2px;
       cursor: pointer;
-      transition: background 0.2s;
-      margin-bottom: 15px;
+      transition: transform .06s ease, background .2s ease, box-shadow .2s ease;
+      margin-bottom: 10px;
+      box-shadow: 0 6px 14px var(--shadow);
     }
 
-    .btn-primary:hover {
-      background: #45a049;
-    }
+    .btn-primary:hover { background: var(--brand-600); transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { background: #c7d2fe; cursor: not-allowed; box-shadow: none; }
 
-    .btn-primary:disabled {
-      background: #cccccc;
-      cursor: not-allowed;
-    }
+    .btn-danger { background: var(--error); }
+    .btn-danger:hover { background: #b91c1c; }
 
     .status-container {
-      margin-top: 20px;
+      margin-top: 8px;
       padding: 0;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-      min-height: 100px;
+      background: var(--card);
+      border-radius: 12px;
+      box-shadow: 0 10px 24px var(--shadow);
+      min-height: 120px;
       transition: all 0.3s ease;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      border: 1px solid var(--border);
     }
 
     .status-container.expanded {
@@ -125,37 +156,18 @@
 
     .status-header {
       padding: 12px 15px;
-      background: #f9f9f9;
-      border-bottom: 1px solid #e0e0e0;
+      background: #fbfbfb;
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
-    .status-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: #666;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
+    .status-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
 
-    .status-count {
-      font-size: 11px;
-      color: #999;
-      background: white;
-      padding: 3px 8px;
-      border-radius: 12px;
-    }
+    .status-count { font-size: 11px; color: var(--muted); background: #fff; padding: 3px 8px; border-radius: 12px; border: 1px solid var(--border); }
 
-    .status-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 15px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+    .status-messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; background: linear-gradient(180deg, #fff 0%, #fcfcfd 100%); }
 
     .status-messages::-webkit-scrollbar {
       width: 8px;
@@ -177,14 +189,14 @@
 
     .status-message {
       font-size: 13px;
-      color: #333;
+      color: var(--text);
       line-height: 1.5;
       padding: 10px 12px;
-      background: #f9f9f9;
-      border-radius: 6px;
-      border-left: 3px solid #4CAF50;
+      background: #f9fafb;
+      border-radius: 8px;
+      border-left: 3px solid var(--brand);
       animation: slideIn 0.2s ease;
-      font-family: 'Courier New', monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
     }
 
     @keyframes slideIn {
@@ -198,23 +210,11 @@
       }
     }
 
-    .status-message.error {
-      border-left-color: #f44336;
-      background: #ffebee;
-      color: #c62828;
-    }
+    .status-message.error { border-left-color: var(--error); background: var(--error-50); color: #7f1d1d; }
 
-    .status-message.success {
-      border-left-color: #4CAF50;
-      background: #e8f5e9;
-      color: #2e7d32;
-    }
+    .status-message.success { border-left-color: var(--success); background: var(--success-50); color: #1b5e20; }
 
-    .status-message.info {
-      border-left-color: #2196F3;
-      background: #e3f2fd;
-      color: #1565c0;
-    }
+    .status-message.info { border-left-color: var(--info); background: var(--info-50); color: #1e3a8a; }
 
     .status-message .timestamp {
       font-size: 10px;
@@ -229,19 +229,26 @@
     }
 
     .info-box {
-      padding: 12px;
-      background: #e3f2fd;
-      border-radius: 6px;
+      padding: 12px 14px;
+      background: #ffffff;
+      border-radius: 12px;
       font-size: 12px;
-      color: #1565c0;
+      color: var(--muted);
       line-height: 1.5;
-      margin-bottom: 20px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 18px var(--shadow);
     }
 
     .info-box strong {
       display: block;
       margin-bottom: 4px;
     }
+    .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    @media (min-width: 720px) { .stats-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+    .stat { background: var(--card); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 6px 14px var(--shadow); }
+    .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+    .stat .value { font-size: 18px; font-weight: 800; margin-top: 2px; color: var(--text); }
   </style>
 </head>
 <body>
@@ -253,31 +260,63 @@
   <div class="content">
     <div id="form-section" class="form-section">
       <div class="info-box">
-        <strong>📁 Download Location:</strong>
-        Files will be saved to <strong>Downloads/jane-scraper/</strong>
+        <strong>📁 Download Location</strong>
+        Files are saved under <strong>Downloads/jane-scraper/</strong>
       </div>
 
-      <div class="form-group">
-        <label for="clinic-name">Clinic Name</label>
-        <input type="text" id="clinic-name" placeholder="bedfordskinclinic" value="bedfordskinclinic">
-      </div>
+      <div class="form-grid">
+        <div class="form-group col-span-2">
+          <label for="clinic-name">Clinic Name</label>
+          <input type="text" id="clinic-name" placeholder="bedfordskinclinic" value="bedfordskinclinic">
+        </div>
 
-      <div class="form-group">
-        <label for="email">Email</label>
-        <input type="email" id="email" placeholder="email@example.com" value="om@brightlight.ai">
-      </div>
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" placeholder="email@example.com" value="om@brightlight.ai">
+        </div>
 
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input type="password" id="password" placeholder="Password" value="Gangoh1976!">
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Password" value="Gangoh1976!">
+        </div>
+
+        <div class="form-group col-span-2">
+          <label for="thread-count">Number of Threads (1-8)</label>
+          <input type="number" id="thread-count" min="1" max="8" value="1">
+        </div>
       </div>
 
       <div class="divider"></div>
     </div>
 
-    <button id="start-btn" class="btn-primary">Start Scrape</button>
-    <button id="start-mt-btn" class="btn-primary" style="background:#2196F3;">Start Multi-Thread (x2)</button>
-    <button id="stop-btn" class="btn-primary" style="display:none; background:#f44336;">Stop Scraping</button>
+    <div id="stats-container" class="info-box" style="margin-bottom: 12px;">
+      <strong>📊 Run Stats</strong>
+      <div class="stats-grid" style="margin-top: 8px;">
+        <div class="stat">
+          <div class="label">PDFs</div>
+          <div class="value" id="stats-pdfs">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Users</div>
+          <div class="value" id="stats-users">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Elapsed</div>
+          <div class="value" id="stats-elapsed">00:00:00</div>
+        </div>
+        <div class="stat">
+          <div class="label">Avg/User</div>
+          <div class="value" id="stats-avg-user">-</div>
+        </div>
+        <div class="stat">
+          <div class="label">Avg/PDF</div>
+          <div class="value" id="stats-avg-pdf">-</div>
+        </div>
+      </div>
+    </div>
+
+    <button id="start-btn" class="btn-primary">▶ Start Scrape</button>
+    <button id="stop-btn" class="btn-primary btn-danger" style="display:none;">■ Stop Scraping</button>
 
     <div id="status-container" class="status-container">
       <div class="status-header">

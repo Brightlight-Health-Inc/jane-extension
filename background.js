@@ -9,11 +9,11 @@
  * - Opens the side panel when the extension icon is clicked
  * - Handles PDF download requests from content scripts
  * - Checks download status for in-progress downloads
+ * - Coordinates multi-threaded scraping across worker tabs
  */
 
 /**
  * Handles extension installation event
- * Logs a confirmation message when the extension is first installed or updated
  */
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Jane Scraper installed');
@@ -77,6 +77,104 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // ========================= Broadcast Stop to All Workers =========================
+  if (request.action === 'broadcastStop') {
+    (async () => {
+      try {
+        const data = await chrome.storage.local.get(['activeThreads', 'workRegistry']);
+        const activeThreads = data.activeThreads || {};
+        const tabIds = Object.values(activeThreads).map((t) => t.tabId).filter((id) => typeof id === 'number');
+
+        await Promise.all(tabIds.map((tabId) => new Promise((resolve) => {
+          chrome.tabs.sendMessage(tabId, { action: 'stopScraping' }, () => resolve(true));
+        })));
+
+        // Also set flags for any future page loads
+        const workRegistry = data.workRegistry || {};
+        await chrome.storage.local.set({ workRegistry: { ...workRegistry, globalStop: true }, stopRequested: true });
+
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true;
+  }
+
+  // ========================= Global Cooldown & Recovery =========================
+  // Triggered when any thread hits the Jane "Whoa there friend" throttle page.
+  // 1) Broadcast stop to all workers
+  // 2) Wait 15 seconds
+  // 3) Redirect all worker tabs to /admin (which redirects to home)
+  // 4) Clear stop flag and allow workers to resume from saved state
+  if (request.action === 'globalCooldownAndRecover') {
+    (async () => {
+      try {
+        const { clinicName, resumeState, threadId } = request;
+
+        // Mark a global stop and broadcast to current workers
+        const data = await chrome.storage.local.get(['activeThreads', 'workRegistry']);
+        const activeThreads = data.activeThreads || {};
+        const tabIds = Object.values(activeThreads)
+          .map((t) => t.tabId)
+          .filter((id) => typeof id === 'number');
+
+        // Send stop to all tabs
+        await Promise.all(tabIds.map((tabId) => new Promise((resolve) => {
+          chrome.tabs.sendMessage(tabId, { action: 'stopScraping' }, () => resolve(true));
+        })));
+
+        // Persist global stop for any late listeners
+        const workRegistry = data.workRegistry || {};
+        await chrome.storage.local.set({ workRegistry: { ...workRegistry, globalStop: true }, stopRequested: true });
+
+        // Optionally persist a best-effort recover hint per thread that triggered it
+        if (threadId && resumeState) {
+          await chrome.storage.local.set({ [threadId + '_recoverHint']: resumeState });
+        }
+
+        // Wait cooldown period (15s)
+        await new Promise((r) => setTimeout(r, 15000));
+
+        // Redirect all worker tabs to /admin
+        const baseClinic = clinicName || workRegistry?.clinicName;
+        if (baseClinic) {
+          await Promise.all(tabIds.map((tabId) => chrome.tabs.update(tabId, { url: `https://${baseClinic}.janeapp.com/admin` })));
+        }
+
+        // After redirects, try sending a resume signal with retries so content is ready
+        await chrome.storage.local.set({ stopRequested: false });
+
+        const sendResumeWithRetry = async (tabId, attempts = 20) => {
+          for (let i = 0; i < attempts; i++) {
+            try {
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              await new Promise((resolve) => {
+                chrome.tabs.sendMessage(tabId, { action: 'clearStopAndResume', clinicName: baseClinic }, () => resolve(true));
+              });
+              break;
+            } catch (_) {
+              // try again
+            }
+          }
+        };
+
+        await Promise.all(tabIds.map((tabId) => sendResumeWithRetry(tabId)));
+
+        // Clear globalStop so future work can continue
+        const latest = await chrome.storage.local.get(['workRegistry']);
+        const wr = latest.workRegistry || {};
+        await chrome.storage.local.set({ workRegistry: { ...wr, globalStop: false } });
+
+        // Done
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true;
+  }
+
   if (request.action === 'deleteFile') {
     // Delete a downloaded file
     chrome.downloads.removeFile(request.downloadId, () => {
@@ -93,6 +191,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+
   // ========================= Threaded Coordinator Actions =========================
   if (request.action === 'startThreads') {
     (async () => {
@@ -102,9 +201,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const completedPatients = {};
         if (resume) {
           // Scan completed zips to build completedPatients map
-          const downloads = await chrome.downloads.search({ filenameRegex: 'jane-scraper/.+__PID\\d+\\.zip$', exists: true });
+          const downloads = await chrome.downloads.search({ filenameRegex: 'jane-scraper/\\d+_.+\\.zip$', exists: true });
           for (const d of downloads || []) {
-            const m = d.filename && d.filename.match(/__PID(\d+)\.zip$/);
+            const m = d.filename && d.filename.match(/\/(\d+)_[^/]+\.zip$/);
             if (m) {
               const pid = parseInt(m[1], 10);
               if (!Number.isNaN(pid)) {
@@ -141,15 +240,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           trySend();
         });
 
-        // Create N tabs and kick off workers with staggered init (20s apart)
+        // Create N tabs and initialize workers
         for (let i = 1; i <= numThreads; i++) {
           const threadId = `T${i}`;
           const tab = await chrome.tabs.create({ url: `https://${clinicName}.janeapp.com/admin` });
           activeThreads[threadId] = { tabId: tab.id, status: 'initializing', patientId: null };
-          // Persist after each creation to keep state
           await chrome.storage.local.set({ activeThreads });
-          // Initialize content script thread after offset
-          const delayMs = (i - 1) * 20000;
+
+          // Initialize with delay (0s for first, 10s for second, etc.)
+          const delayMs = (i - 1) * 10000;
           setTimeout(async () => {
             await sendMessageWithRetry(tab.id, { action: 'initThread', threadId, clinicName, email, password, loginDelayMs: delayMs });
           }, delayMs);
