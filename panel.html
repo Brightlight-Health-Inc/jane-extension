@@ -253,8 +253,8 @@
 </head>
 <body>
   <div class="header">
-    <h1>Jane App Scraper</h1>
-    <p>Automated login and scraping</p>
+    <h1>Jane Chart Assistant</h1>
+    <p>Bulk chart export and organization tool</p>
   </div>
 
   <div class="content">
@@ -267,22 +267,24 @@
       <div class="form-grid">
         <div class="form-group col-span-2">
           <label for="clinic-name">Clinic Name</label>
-          <input type="text" id="clinic-name" placeholder="bedfordskinclinic" value="bedfordskinclinic">
+          <input type="text" id="clinic-name" placeholder="e.g., yourClinicName" value="">
+          <small style="display: block; margin-top: 4px; color: #6b7280; font-size: 11px;">Enter your clinic subdomain from yourClinicName.janeapp.com</small>
         </div>
 
         <div class="form-group">
           <label for="email">Email</label>
-          <input type="email" id="email" placeholder="email@example.com" value="om@brightlight.ai">
+          <input type="email" id="email" placeholder="your.email@example.com" value="">
         </div>
 
         <div class="form-group">
           <label for="password">Password</label>
-          <input type="password" id="password" placeholder="Password" value="Gangoh1976!">
+          <input type="password" id="password" placeholder="Your Jane App password" value="">
         </div>
 
         <div class="form-group col-span-2">
-          <label for="thread-count">Number of Threads (1-8)</label>
-          <input type="number" id="thread-count" min="1" max="8" value="1">
+          <label for="thread-count">Number of Threads (1-5)</label>
+          <input type="number" id="thread-count" min="1" max="5" value="1">
+          <small style="display: block; margin-top: 4px; color: #6b7280; font-size: 11px;">⚠️ Note: More threads = slower PC performance for other tasks</small>
         </div>
       </div>
 
@@ -305,18 +307,18 @@
           <div class="value" id="stats-elapsed">00:00:00</div>
         </div>
         <div class="stat">
-          <div class="label">Avg/User</div>
+          <div class="label">Avg Time/User</div>
           <div class="value" id="stats-avg-user">-</div>
         </div>
         <div class="stat">
-          <div class="label">Avg/PDF</div>
+          <div class="label">Avg Time/PDF</div>
           <div class="value" id="stats-avg-pdf">-</div>
         </div>
       </div>
     </div>
 
-    <button id="start-btn" class="btn-primary">▶ Start Scrape</button>
-    <button id="stop-btn" class="btn-primary btn-danger" style="display:none;">■ Stop Scraping</button>
+    <button id="start-btn" class="btn-primary">▶ Start Export</button>
+    <button id="stop-btn" class="btn-primary btn-danger" style="display:none;">■ Stop Export</button>
 
     <div id="status-container" class="status-container">
       <div class="status-header">
@@ -324,7 +326,7 @@
         <div class="status-count" id="status-count">0 messages</div>
       </div>
       <div class="status-messages" id="status-messages">
-        <div class="status-message info">Ready to start scraping...</div>
+        <div class="status-message info">Ready to export charts...</div>
       </div>
     </div>
   </div>

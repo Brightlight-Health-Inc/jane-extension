@@ -1,51 +1,69 @@
 /**
  * SIDE PANEL SCRIPT
  * 
- * This script manages the side panel UI for the Jane Scraper extension.
- * It provides a form for users to enter their credentials and controls
- * to start/stop the scraping process.
+ * This manages the UI side panel that the user interacts with.
  * 
- * Key features:
- * - Collects clinic name, email, and password from the user
- * - Starts the scraping process by navigating to Jane App and passing credentials
- * - Displays real-time status updates from the content script
- * - Allows users to stop the scraping process at any time
+ * What it does:
+ * - Shows a form to enter Jane App credentials
+ * - Has start/stop buttons
+ * - Displays real-time status messages from worker threads
+ * - Shows stats (PDFs downloaded, users processed, time elapsed, etc.)
+ * - Automatically switches to "stop" mode when scraping is running
  */
 
-// DOM element references
+// ============================================================================
+// UI ELEMENTS
+// ============================================================================
+
+// Get references to all the UI elements we need
 const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
 const statusMessages = document.getElementById('status-messages');
 const statusCount = document.getElementById('status-count');
 const formSection = document.getElementById('form-section');
 const statusContainer = document.getElementById('status-container');
-// Stats elements
+
+// Stats display elements
 const statsPdfs = document.getElementById('stats-pdfs');
 const statsUsers = document.getElementById('stats-users');
 const statsElapsed = document.getElementById('stats-elapsed');
 const statsAvgUser = document.getElementById('stats-avg-user');
 const statsAvgPdf = document.getElementById('stats-avg-pdf');
 
-// Message history
+// ============================================================================
+// STATE TRACKING
+// ============================================================================
+
+// Message counter
 let messageCount = 1; // Start at 1 for the initial "Ready" message
 
-// Stats state
-let runStartTime = null;
-let pdfCount = 0;
-let userCount = 0;
-let userStartTime = null;
-let totalUserDurationMs = 0;
-let totalPdfDurationMs = 0;
-let lastPdfTime = null;
+// Stats tracking
+let runStartTime = null;        // When did the run start?
+let pdfCount = 0;                // How many PDFs have we downloaded?
+let userCount = 0;               // How many patients have we processed?
+let userStartTime = null;        // When did we start the current patient?
+let totalUserDurationMs = 0;     // Total time spent on all patients
+let totalPdfDurationMs = 0;      // Total time spent on all PDFs
+let lastPdfTime = null;          // When was the last PDF downloaded?
 
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Format milliseconds as HH:MM:SS
+ */
 function formatDuration(ms) {
-  const s = Math.floor(ms / 1000);
-  const hh = String(Math.floor(s / 3600)).padStart(2, '0');
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-  const ss = String(s % 60).padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
 }
 
+/**
+ * Reset all stats to zero for a new run
+ */
 function resetStats() {
   runStartTime = Date.now();
   pdfCount = 0;
@@ -54,6 +72,8 @@ function resetStats() {
   totalUserDurationMs = 0;
   totalPdfDurationMs = 0;
   lastPdfTime = null;
+  
+  // Update UI
   statsPdfs.textContent = '0';
   statsUsers.textContent = '0';
   statsElapsed.textContent = '00:00:00';
@@ -61,23 +81,22 @@ function resetStats() {
   statsAvgPdf.textContent = '-';
 }
 
+/**
+ * Update the elapsed time display (called every second)
+ */
 function tickElapsed() {
   if (!runStartTime) return;
   statsElapsed.textContent = formatDuration(Date.now() - runStartTime);
 }
 
+// Update elapsed time every second
 setInterval(tickElapsed, 1000);
 
 /**
- * Updates the status message displayed in the side panel
- * Adds messages to history instead of replacing
- *
- * @param {string} message - The status message to display
- * @param {string} [type='info'] - The message type ('info', 'success', or 'error')
- * @returns {void}
+ * Add a status message to the log
  */
 function updateStatus(message, type = 'info') {
-  // Create timestamp
+  // Create a timestamp for this message
   const now = new Date();
   const timestamp = now.toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -86,66 +105,62 @@ function updateStatus(message, type = 'info') {
     hour12: false
   });
 
-  // Create new message element
-  const messageEl = document.createElement('div');
-  messageEl.className = `status-message ${type}`;
-  messageEl.innerHTML = `<span class="timestamp">${timestamp}</span>${message}`;
+  // Create the message element
+  const messageElement = document.createElement('div');
+  messageElement.className = `status-message ${type}`;
+  messageElement.innerHTML = `<span class="timestamp">${timestamp}</span>${message}`;
 
-  // Add to messages container
-  statusMessages.appendChild(messageEl);
+  // Add it to the log
+  statusMessages.appendChild(messageElement);
 
-  // Update count
+  // Update message counter
   messageCount++;
-  statusCount.textContent = `${messageCount} message${messageCount !== 1 ? 's' : ''}`;
+  const plural = messageCount !== 1 ? 's' : '';
+  statusCount.textContent = `${messageCount} message${plural}`;
 
-  // Auto-scroll to bottom
+  // Auto-scroll to show the newest message
   statusMessages.scrollTop = statusMessages.scrollHeight;
-
-  // Limit to 100 messages to prevent memory issues
-  const messages = statusMessages.querySelectorAll('.status-message');
-  if (messages.length > 100) {
-    messages[0].remove();
-  }
 }
 
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
 /**
- * Handles the Start button click event
- *
- * Validates form fields and starts scraping with specified number of threads.
- * - If thread count = 1: Works like single-threaded mode
- * - If thread count > 1: Creates multiple tabs coordinated by background.js
+ * Start button - validates form and starts scraping
  */
 startBtn.addEventListener('click', async () => {
+  // Get form values
   const clinicName = document.getElementById('clinic-name').value.trim();
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value.trim();
   const threadCount = parseInt(document.getElementById('thread-count').value, 10);
 
+  // Validate inputs
   if (!clinicName || !email || !password) {
     updateStatus('Please fill in all fields', 'error');
     return;
   }
 
-  if (!threadCount || threadCount < 1 || threadCount > 8) {
-    updateStatus('Thread count must be between 1 and 8', 'error');
+  if (!threadCount || threadCount < 1 || threadCount > 5) {
+    updateStatus('Thread count must be between 1 and 5', 'error');
     return;
   }
 
-  // Hide form and expand status
+  // Switch UI to "running" mode
   formSection.classList.add('hidden');
   statusContainer.classList.add('expanded');
-
-  // Show stop button, hide start button
   startBtn.style.display = 'none';
   stopBtn.style.display = 'block';
   stopBtn.disabled = false;
 
-  // Reset stats for new run
+  // Reset stats
   resetStats();
 
-  updateStatus(`Starting with ${threadCount} thread${threadCount > 1 ? 's' : ''}...`);
+  const plural = threadCount > 1 ? 's' : '';
+  updateStatus(`Starting with ${threadCount} thread${plural}...`);
 
-  // Start threads via background coordinator
+  // Tell background.js to start the worker threads
   chrome.runtime.sendMessage({
     action: 'startThreads',
     clinicName,
@@ -154,96 +169,109 @@ startBtn.addEventListener('click', async () => {
     startingIndex: 1,
     numThreads: threadCount,
     resume: false
-  }, (resp) => {
+  }, (response) => {
     if (chrome.runtime.lastError) {
       updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
       return;
     }
-    if (!resp || !resp.ok) {
-      updateStatus('❌ Could not start: ' + (resp?.error || 'unknown'), 'error');
+    
+    if (!response || !response.ok) {
+      updateStatus('❌ Could not start: ' + (response?.error || 'unknown'), 'error');
     } else {
-      updateStatus(`✅ ${threadCount} thread${threadCount > 1 ? 's' : ''} started`);
+      updateStatus(`✅ ${threadCount} thread${plural} started`);
     }
   });
 });
 
 /**
- * Handles the Stop button click event
- * 
- * Sends a message to the content script to stop the scraping process,
- * then resets the UI back to the initial state.
+ * Stop button - stops all worker threads
  */
 stopBtn.addEventListener('click', async () => {
-  updateStatus('Stopping scraping...', 'info');
+  updateStatus('Stopping...', 'info');
 
-  // Request background to broadcast stop to all worker tabs
-  chrome.runtime.sendMessage({ action: 'broadcastStop' }, (resp) => {
-    if (!resp || resp.ok !== true) {
-      updateStatus('❌ Error stopping: ' + (resp?.error || chrome.runtime.lastError?.message || 'unknown'), 'error');
+  // Set stop flags
+  await chrome.storage.local.set({ stopRequested: true, userRequestedStop: true });
+
+  // Tell background.js to stop all workers
+  chrome.runtime.sendMessage({ action: 'broadcastStop' }, (response) => {
+    if (!response || response.ok !== true) {
+      const error = response?.error || chrome.runtime.lastError?.message || 'unknown';
+      updateStatus('❌ Error stopping: ' + error, 'error');
       return;
     }
-    updateStatus('⏹️ Stop signal sent to all workers', 'info');
+    updateStatus('⏹️ Stop signal sent', 'info');
   });
 });
 
-// Auto-stop if the side panel closes
+/**
+ * Auto-stop if user closes the side panel
+ */
 window.addEventListener('beforeunload', () => {
   try {
     chrome.storage.local.set({ stopRequested: true });
     chrome.runtime.sendMessage({ action: 'broadcastStop' });
-  } catch (_) {}
+  } catch (_) {
+    // Ignore errors on unload
+  }
 });
 
 /**
- * Listens for status updates from the content script
- * 
- * Updates the status display in real-time as the scraping progresses.
- * Automatically resets the UI when scraping completes or is stopped.
- * 
- * @param {Object} request - The message request object
- * @param {string} request.action - The action type ('statusUpdate')
- * @param {Object} request.status - The status object containing message and type
+ * Listen for status messages from worker threads
+ * Updates the UI with progress and calculates stats
  */
 chrome.runtime.onMessage.addListener((request) => {
   if (request.action === 'statusUpdate') {
-    const msg = request.status.message || '';
-    updateStatus(msg, request.status.type);
+    const message = request.status.message || '';
+    
+    // Display the message
+    updateStatus(message, request.status.type);
 
-    // Detect user start/end
-    if (msg.startsWith('📋 Processing patient ')) {
-      // starting a new user
+    // Track stats based on message content
+    // (Messages include [T1], [T2] prefixes from different threads)
+    
+    // New patient started
+    if (message.includes('📋 Processing patient ')) {
       userStartTime = Date.now();
     }
-    if (msg.startsWith('✅ Completed patient ')) {
-      // finished current user
-      userCount += 1;
+    
+    // Patient completed
+    if (message.includes('✅ Completed patient ')) {
+      userCount++;
       statsUsers.textContent = String(userCount);
+      
       if (userStartTime) {
         totalUserDurationMs += (Date.now() - userStartTime);
         userStartTime = null;
       }
     }
 
-    // Detect successful PDF download lines
-    if (msg.startsWith('✅ Downloaded: ')) {
-      pdfCount += 1;
+    // PDF downloaded
+    if (message.includes('✅ Downloaded: ')) {
+      pdfCount++;
       statsPdfs.textContent = String(pdfCount);
-      if (lastPdfTime) totalPdfDurationMs += (Date.now() - lastPdfTime);
+      
+      if (lastPdfTime) {
+        totalPdfDurationMs += (Date.now() - lastPdfTime);
+      }
       lastPdfTime = Date.now();
     }
 
-    // Update averages
+    // Update average times
     if (userCount > 0) {
-      statsAvgUser.textContent = formatDuration(Math.floor(totalUserDurationMs / userCount));
+      const avgUserTime = Math.floor(totalUserDurationMs / userCount);
+      statsAvgUser.textContent = formatDuration(avgUserTime);
     }
     if (pdfCount > 0) {
-      statsAvgPdf.textContent = formatDuration(Math.floor(totalPdfDurationMs / pdfCount));
+      const avgPdfTime = Math.floor(totalPdfDurationMs / pdfCount);
+      statsAvgPdf.textContent = formatDuration(avgPdfTime);
     }
 
-    // Only reset UI on global done or explicit stopped
-    const isGlobalDone = msg.includes('No more work available');
-    const isExplicitStopped = msg.includes('Scraping stopped');
-    if (isGlobalDone || isExplicitStopped) {
+    // Check if scraping is done
+    const isDone = message.includes('No more work available') || 
+                   message.includes('Scraping stopped');
+    
+    if (isDone) {
+      // Wait 2 seconds then reset UI
       setTimeout(() => {
         stopBtn.style.display = 'none';
         startBtn.style.display = 'block';
@@ -253,5 +281,39 @@ chrome.runtime.onMessage.addListener((request) => {
     }
   }
 });
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+/**
+ * Check if scraping is already running when panel opens
+ * (This handles the case where user closes and reopens the panel while scraping)
+ */
+(async function initializePanel() {
+  try {
+    const data = await chrome.storage.local.get(['activeThreads']);
+    const activeThreads = data.activeThreads || {};
+    const threadCount = Object.keys(activeThreads).length;
+
+    if (threadCount > 0) {
+      // Scraping is running - switch to "stop" mode
+      console.log('Scraping already running - showing stop UI');
+      
+      formSection.classList.add('hidden');
+      statusContainer.classList.add('expanded');
+      startBtn.style.display = 'none';
+      stopBtn.style.display = 'block';
+      stopBtn.disabled = false;
+      
+      resetStats();
+      
+      const plural = threadCount > 1 ? 's' : '';
+      updateStatus(`Reconnected - ${threadCount} thread${plural} running`, 'info');
+    }
+  } catch (e) {
+    console.error('Failed to check running state:', e);
+  }
+})();
 
 console.log('Side panel loaded');

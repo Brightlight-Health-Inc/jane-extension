@@ -1,56 +1,79 @@
-# Jane App Scraper
+# Jane Chart Assistant
 
-Chrome extension for automatically scraping patient chart PDFs from Jane App.
+Chrome extension for healthcare professionals to efficiently export and organize patient chart PDFs from Jane App for record keeping and compliance purposes.
+
+## Overview
+
+Jane Chart Assistant streamlines the process of downloading patient charts from Jane App. Instead of manually clicking through each patient's charts one by one, this tool helps you export multiple charts in bulk, saving time on administrative tasks.
+
+**Privacy First**: No data is collected or transmitted. All operations occur locally on your device. See [Privacy Policy](PRIVACY_POLICY.md) for details.
 
 ## Installation
 
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in top right)
-3. Click **Load unpacked**
-4. Select this folder
+### From Chrome Web Store (Recommended)
+*Coming soon - pending review*
+
+### Manual Installation (Developer Mode)
+1. Download or clone this repository
+2. Open Chrome and navigate to `chrome://extensions/`
+3. Enable **Developer mode** (toggle in top right)
+4. Click **Load unpacked**
+5. Select the extension folder
 
 ## Usage
 
-1. Click the extension icon to open the side panel
+1. Click the extension icon to open the Chart Assistant panel
 2. Enter your Jane App credentials:
-   - Clinic name (e.g., `bedfordskinclinic`)
-   - Email
+   - Clinic name (e.g., `yourClinicName` from `yourClinicName.janeapp.com`)
+   - Email address
    - Password
-3. Click **Start Scrape**
-4. The extension will:
-   - Navigate to Jane App
-   - Log you in automatically
-   - Iterate through patient IDs
-   - Download all chart PDFs for each patient
-   - Create a ZIP file per patient
-   - Stop after 5 consecutive patients not found
+   - Number of concurrent export threads (1-5)
+3. Click **Start Export**
+4. The assistant will:
+   - Log into your Jane App account
+   - Navigate through patient records
+   - Download chart PDFs for each patient
+   - Organize files into patient-specific folders
+   - Continue until all patients are processed
 
 ## Download Location
 
 All files are saved to: `Downloads/jane-scraper/`
 
-Each patient gets a single ZIP file named `PatientName.zip` containing all their charts.
-
-## Configuration
-
-You can change the starting patient ID in `content.js`:
-
-```javascript
-const STARTING_INDEX = 1; // Change this to start from a different patient ID
-```
+Each patient gets their own folder: `PatientID_PatientName/` containing all their chart PDFs.
 
 ## Features
 
-- ✅ Automatic login
-- ✅ Resume on page reload (state persisted)
-- ✅ External skip detection (patient doesn't exist)
-- ✅ Internal skip handling (patient exists but has no charts)
-- ✅ ZIP archives per patient
-- ✅ Automatic cleanup of individual PDFs after zipping
-- ✅ Stop button to interrupt scraping at any time
+- ✅ Bulk chart export - save hours of manual clicking
+- ✅ Multi-threaded processing for faster exports
+- ✅ Automatic resume if interrupted
+- ✅ Skip patients with no charts automatically
+- ✅ Organized folder structure by patient
+- ✅ Real-time progress tracking
+- ✅ Stop/resume capability
 
-## Notes
+## Privacy & Security
 
-- The extension stops after finding 5 consecutive patients that don't exist
-- Patients with no charts are skipped (internal skip - doesn't count toward the limit)
-- All state is saved across page navigations, so you can reload without losing progress
+- **Zero data collection** - no analytics, no telemetry
+- **Local storage only** - credentials never leave your device
+- **No external servers** - communicates only with Jane App
+- **You control your data** - all files saved locally
+- See full [Privacy Policy](PRIVACY_POLICY.md)
+
+## Compliance
+
+This tool is designed to assist healthcare professionals with:
+- Record keeping and archival requirements
+- Compliance documentation
+- Practice transition support
+- Backup and disaster recovery
+
+**Your Responsibility**: Users must ensure compliance with HIPAA, local regulations, and their organization's data handling policies.
+
+## Support
+
+For issues, questions, or feature requests, please open an issue on GitHub.
+
+## License
+
+Copyright © 2025. All rights reserved.

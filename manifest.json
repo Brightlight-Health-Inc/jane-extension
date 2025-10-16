@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Jane App Scraper",
+  "name": "Jane Chart Assistant",
   "version": "1.0.0",
-  "description": "Chrome extension for automating Jane App login and scraping",
+  "description": "Download and organize patient charts from Jane App for record keeping and compliance",
+  "homepage_url": "https://github.com/Brightlight-Health-Inc/jane-extension",
+  "icons": {
+    "16": "16.png",
+    "48": "48.png",
+    "128": "128.png"
+  },
   "permissions": [
     "sidePanel",
     "activeTab",
@@ -12,20 +18,20 @@
     "downloads"
   ],
   "host_permissions": [
-    "http://*/*",
-    "https://*/*"
+    "https://*.janeapp.com/*"
   ],
   "side_panel": {
     "default_path": "panel.html"
   },
   "action": {
-    "default_title": "Open Jane Scraper" },
+    "default_title": "Open Chart Assistant"
+  },
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["https://*.janeapp.com/*"],
       "js": ["jszip.min.js", "content.js"],
       "run_at": "document_idle"
     }
