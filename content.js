@@ -18,7 +18,7 @@
 // ============================================================================
 // SIMPLE CONFIGURATION
 // ============================================================================
-
+const max_id = null; // null for no max
 const MAX_WAIT_TIME = 60000; // Maximum time to wait for page loads (60 seconds)
 const PAGE_DELAY = 1000; // Standard delay between actions (1 second)
 
@@ -300,7 +300,7 @@ async function scheduleRecovery(clinicName, resumeState) {
  * Pause all threads and wait before retrying
  * Used when we can't find PDF controls (page not loaded properly)
  */
-async function pauseAllThreadsAndRetry(clinicName, resumeState, pauseMs = 120000) {
+async function pauseAllThreadsAndRetry(clinicName, resumeState, pauseMs = 70_000) {
   try {
     if (!clinicName) clinicName = getClinicNameFromUrl();
     if (!clinicName || shouldStop) return;
@@ -326,13 +326,14 @@ async function pauseAllThreadsAndRetry(clinicName, resumeState, pauseMs = 120000
     // Wait locally without affecting other threads
     await new Promise((resolve) => setTimeout(resolve, pauseMs));
 
-    // Do not resume if a global/user stop was requested during the pause
+    // Respect explicit user stop, but do not let a temporary global stop block resume
     const flags = await chrome.storage.local.get(['stopRequested', 'userRequestedStop']);
-    if (flags && (flags.stopRequested || flags.userRequestedStop)) {
-      return;
+    if (flags && flags.userRequestedStop) {
+      return; // user explicitly stopped; do not resume
     }
 
-    // Clear local stop and resume from saved state
+    // Clear stop and resume work (even if a transient stopRequested was set earlier)
+    await chrome.storage.local.set({ stopRequested: false });
     shouldStop = false;
     const stateNowWrap = await chrome.storage.local.get(getStorageKey('scrapingState'));
     const stateNow = stateNowWrap && stateNowWrap[getStorageKey('scrapingState')];
@@ -345,6 +346,9 @@ async function pauseAllThreadsAndRetry(clinicName, resumeState, pauseMs = 120000
         }
       });
       await scheduleRecovery(clinicName, stateNow);
+    } else {
+      // No saved state; request new work to avoid going idle
+      await requestNextWork(clinicName);
     }
   } catch (_) {
     // Ignore errors in pause logic
@@ -917,7 +921,11 @@ async function handleChartDownload(state) {
           return;
         }
 
-        pdfDownloadButton = document.querySelector('a.btn.btn-default[href$=".pdf"]');
+        await sleep(2_000);
+
+        // Some clinics append query params to the PDF link (e.g. .pdf?download=1)
+        // Use a contains selector instead of ends-with to catch both cases
+        pdfDownloadButton = document.querySelector('a.btn.btn-default[href*=".pdf"]');
         if (pdfDownloadButton) break;
 
         await sleep(1000);
@@ -926,13 +934,23 @@ async function handleChartDownload(state) {
 
       // Can't find the PDF download button
       if (!pdfDownloadButton) {
+        // If we've hit max retries, fall back to a longer local pause and then try fresh
         if (currentRetry >= maxRetries) {
-          // Give up after max retries
-          sendStatus(`❌ PDF download link not found after ${maxRetries} retries - stopping`, 'error');
-          await chrome.storage.local.remove([getStorageKey('scrapingState')]);
-          shouldStop = true;
-          chrome.storage.local.set({ stopRequested: true });
-          chrome.runtime.sendMessage({ action: 'broadcastStop' });
+          sendStatus(`⚠️ PDF link not found after ${maxRetries} retries, pausing longer and retrying...`, 'warning');
+          const resumeState = {
+            action: 'downloadChart',
+            clinicName,
+            patientId,
+            chartEntryId,
+            headerText,
+            patientName,
+            remainingEntries,
+            totalCharts,
+            waitingForPdfPage: true,
+            retryCount: 0,
+            needsRefresh: true
+          };
+          await pauseAllThreadsAndRetry(clinicName, resumeState, 100000);
           return;
         }
 
@@ -952,7 +970,7 @@ async function handleChartDownload(state) {
           needsRefresh: true
         };
 
-        await pauseAllThreadsAndRetry(clinicName, resumeState, 120000);
+        await pauseAllThreadsAndRetry(clinicName, resumeState, 100000);
         return;
       }
 
@@ -1125,7 +1143,7 @@ async function handleChartDownload(state) {
         needsRefresh: true
       };
 
-      await pauseAllThreadsAndRetry(clinicName, resumeState, 120000);
+      await pauseAllThreadsAndRetry(clinicName, resumeState, 100000);
       return;
     }
 
@@ -1525,8 +1543,10 @@ chrome.storage.local.get(null, async (result) => {
       chrome.runtime.sendMessage({ action: 'getThreadAssignment' }, (resp) => {
         if (resp && resp.ok && resp.threadId) {
           threadId = resp.threadId;
+          sendStatus(`[Thread] Assigned threadId: ${threadId}`);
           console.log(`[Thread] Assigned threadId: ${threadId}`);
         } else {
+          sendStatus('❌ Failed to get threadId', 'error');
           console.warn('[Thread] Failed to get threadId:', resp);
         }
         resolve();
@@ -1549,8 +1569,8 @@ chrome.storage.local.get(null, async (result) => {
     }
   }
 
-  // Check for stop request
-  if (result.stopRequested || result.userRequestedStop || shouldStop) {
+  // Check for explicit user stop; ignore transient stopRequested so threads auto-resume
+  if (result.userRequestedStop || shouldStop) {
     chrome.storage.local.remove(['stopRequested', 'userRequestedStop', getStorageKey('scrapingState')]);
     sendStatus('⏹️ Scraping stopped', 'info');
     return;

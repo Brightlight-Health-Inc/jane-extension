@@ -18,6 +18,7 @@
 // Get references to all the UI elements we need
 const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
+const testBtn = document.getElementById('test-btn');
 const statusMessages = document.getElementById('status-messages');
 const statusCount = document.getElementById('status-count');
 const formSection = document.getElementById('form-section');
@@ -135,6 +136,8 @@ startBtn.addEventListener('click', async () => {
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value.trim();
   const threadCount = parseInt(document.getElementById('thread-count').value, 10);
+  const maxIdInput = document.getElementById('max-id').value.trim();
+  const maxId = maxIdInput ? parseInt(maxIdInput, 10) : null;
 
   // Validate inputs
   if (!clinicName || !email || !password) {
@@ -168,6 +171,7 @@ startBtn.addEventListener('click', async () => {
     password,
     startingIndex: 1,
     numThreads: threadCount,
+    maxId,
     resume: false
   }, (response) => {
     if (chrome.runtime.lastError) {
@@ -200,6 +204,63 @@ stopBtn.addEventListener('click', async () => {
       return;
     }
     updateStatus('⏹️ Stop signal sent', 'info');
+  });
+});
+
+/**
+ * Test button - runs a short test from ID 1 to 5
+ */
+testBtn.addEventListener('click', async () => {
+  // Get form values
+  const clinicName = document.getElementById('clinic-name').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value.trim();
+  const threadCount = parseInt(document.getElementById('thread-count').value, 10) || 1;
+
+  // Validate inputs
+  if (!clinicName || !email || !password) {
+    updateStatus('Please fill in all fields to run the test', 'error');
+    return;
+  }
+
+  // Validate threads
+  if (!threadCount || threadCount < 1 || threadCount > 5) {
+    updateStatus('Thread count must be between 1 and 5', 'error');
+    return;
+  }
+
+  // Switch UI to "running" mode
+  formSection.classList.add('hidden');
+  statusContainer.classList.add('expanded');
+  startBtn.style.display = 'none';
+  stopBtn.style.display = 'block';
+  stopBtn.disabled = false;
+
+  // Reset stats
+  resetStats();
+
+  const plural = threadCount > 1 ? 's' : '';
+  updateStatus(`Starting test run (IDs 1–5) with ${threadCount} thread${plural}...`);
+
+  chrome.runtime.sendMessage({
+    action: 'startThreads',
+    clinicName,
+    email,
+    password,
+    startingIndex: 1,
+    numThreads: threadCount,
+    maxId: 5,
+    resume: false
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
+      return;
+    }
+    if (!response || !response.ok) {
+      updateStatus('❌ Could not start: ' + (response?.error || 'unknown'), 'error');
+    } else {
+      updateStatus('✅ Test run started');
+    }
   });
 });
 

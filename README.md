@@ -1,79 +1,49 @@
-# Jane Chart Assistant
+# Privacy Policy for Jane Chart Assistant
 
-Chrome extension for healthcare professionals to efficiently export and organize patient chart PDFs from Jane App for record keeping and compliance purposes.
+**Last Updated:** October 15, 2025
 
 ## Overview
+Jane Chart Assistant is a Chrome extension that helps healthcare professionals efficiently export and organize patient chart PDFs from Jane App for record keeping and compliance purposes.
 
-Jane Chart Assistant streamlines the process of downloading patient charts from Jane App. Instead of manually clicking through each patient's charts one by one, this tool helps you export multiple charts in bulk, saving time on administrative tasks.
+## Data Collection and Storage
+**We collect and store NO data.** All operations occur locally on your device:
 
-**Privacy First**: No data is collected or transmitted. All operations occur locally on your device. See [Privacy Policy](PRIVACY_POLICY.md) for details.
+- **Login Credentials**: Temporarily stored in your browser's local storage during export sessions only. Never transmitted to any third party.
+- **Patient Charts**: Downloaded directly to your local Downloads folder. No data is sent to external servers.
+- **No Analytics**: We do not collect usage statistics, analytics, or telemetry data.
+- **No External Servers**: This extension does not communicate with any servers other than Jane App's official domains.
 
-## Installation
+## Data Processing
+- All chart downloads occur directly between your browser and Jane App's servers
+- Files are saved locally to your computer's Downloads folder
+- The extension acts as a convenience tool to streamline manual downloading that you would otherwise perform yourself
 
-### From Chrome Web Store (Recommended)
-*Coming soon - pending review*
+## Permissions Explained
+- **Jane App Access** (`https://*.janeapp.com/*`): Required to access and download charts from your Jane App account
+- **Downloads**: Required to save PDF files to your Downloads folder
+- **Storage**: Used to temporarily store session state during export operations
+- **Tabs & Scripting**: Required to navigate Jane App pages and extract chart data
 
-### Manual Installation (Developer Mode)
-1. Download or clone this repository
-2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable **Developer mode** (toggle in top right)
-4. Click **Load unpacked**
-5. Select the extension folder
+## Data Security
+- Credentials are stored only in Chrome's secure local storage
+- All data remains on your local device
+- No data is transmitted to third parties
+- Extension only accesses Jane App - no other websites
 
-## Usage
-
-1. Click the extension icon to open the Chart Assistant panel
-2. Enter your Jane App credentials:
-   - Clinic name (e.g., `yourClinicName` from `yourClinicName.janeapp.com`)
-   - Email address
-   - Password
-   - Number of concurrent export threads (1-5)
-3. Click **Start Export**
-4. The assistant will:
-   - Log into your Jane App account
-   - Navigate through patient records
-   - Download chart PDFs for each patient
-   - Organize files into patient-specific folders
-   - Continue until all patients are processed
-
-## Download Location
-
-All files are saved to: `Downloads/jane-scraper/`
-
-Each patient gets their own folder: `PatientID_PatientName/` containing all their chart PDFs.
-
-## Features
-
-- ✅ Bulk chart export - save hours of manual clicking
-- ✅ Multi-threaded processing for faster exports
-- ✅ Automatic resume if interrupted
-- ✅ Skip patients with no charts automatically
-- ✅ Organized folder structure by patient
-- ✅ Real-time progress tracking
-- ✅ Stop/resume capability
-
-## Privacy & Security
-
-- **Zero data collection** - no analytics, no telemetry
-- **Local storage only** - credentials never leave your device
-- **No external servers** - communicates only with Jane App
-- **You control your data** - all files saved locally
-- See full [Privacy Policy](PRIVACY_POLICY.md)
+## User Control
+You maintain full control:
+- Credentials can be cleared at any time by closing the extension
+- Downloaded files are standard PDFs you can manage/delete as needed
+- You can uninstall the extension at any time
 
 ## Compliance
+This tool is designed to assist with record keeping and compliance requirements. Users are responsible for:
+- Ensuring compliance with HIPAA and other applicable regulations
+- Properly securing downloaded patient data
+- Following their organization's data handling policies
 
-This tool is designed to assist healthcare professionals with:
-- Record keeping and archival requirements
-- Compliance documentation
-- Practice transition support
-- Backup and disaster recovery
+## Changes to This Policy
+We may update this policy periodically. Users will be notified of significant changes through extension updates.
 
-**Your Responsibility**: Users must ensure compliance with HIPAA, local regulations, and their organization's data handling policies.
-
-## Support
-
-For issues, questions, or feature requests, please open an issue on GitHub.
-
-## License
-
-Copyright © 2025. All rights reserved.
+## Contact
+For questions or concerns about privacy, please contact us through the extension's GitHub repository.

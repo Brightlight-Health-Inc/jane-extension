@@ -32,7 +32,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.janeapp.com/*"],
-      "js": ["jszip.min.js", "content.js"],
+      "js": ["content.js"],
       "run_at": "document_idle"
     }
   ]

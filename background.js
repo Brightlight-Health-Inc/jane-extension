@@ -188,7 +188,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const { clinicName, threadId } = request;
         
         // Default to 2 minutes pause, but allow override (1 second to 2 minutes)
-        const pauseMs = Math.max(1000, Math.min(120000, Number(request.pauseMs) || 120000));
+        const pauseMs = Math.max(1000, Math.min(100000, Number(request.pauseMs) || 100000));
         const cooldownUntil = Date.now() + pauseMs;
 
         // Get all active worker tabs
@@ -322,7 +322,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'startThreads') {
     (async () => {
       try {
-        const { clinicName, email, password, startingIndex = 1, numThreads = 2, resume = false } = request;
+        const { clinicName, email, password, startingIndex = 1, numThreads = 2, resume = false, maxId = null } = request;
 
         // Clean up any existing threads from a previous run to avoid ghosts
         try {
@@ -430,6 +430,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             clinicName,
             startingIndex,
             nextPatientId: startingIndex,
+            maxId: (Number.isInteger(maxId) && maxId > 0) ? maxId : null,
             globalStop: false
           },
           activeThreads,
@@ -526,7 +527,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
-        let { nextPatientId = 1 } = workRegistry;
+        let { nextPatientId = 1, maxId = null } = workRegistry;
 
         // Find the next patient that:
         // 1. Hasn't been completed already
@@ -535,6 +536,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         let probeId = nextPatientId;
         
         for (let attempts = 0; attempts < 5000; attempts++) {
+          // Respect maxId limit if provided
+          if (Number.isInteger(maxId) && probeId > maxId) {
+            assignedId = null;
+            break;
+          }
           const isCompleted = !!completedPatients[probeId];
           const isLocked = patientLocks[probeId] && patientLocks[probeId].threadId !== threadId;
           
