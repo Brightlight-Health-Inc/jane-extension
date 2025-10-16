@@ -119,8 +119,11 @@ function updateStatus(message, type = 'info') {
   const plural = messageCount !== 1 ? 's' : '';
   statusCount.textContent = `${messageCount} message${plural}`;
 
-  // Auto-scroll to show the newest message
-  statusMessages.scrollTop = statusMessages.scrollHeight;
+  // Auto-scroll only if user is already at/near the bottom (not manually scrolled up)
+  const isNearBottom = statusMessages.scrollHeight - statusMessages.scrollTop <= statusMessages.clientHeight + 50;
+  if (isNearBottom) {
+    statusMessages.scrollTop = statusMessages.scrollHeight;
+  }
 }
 
 // ============================================================================

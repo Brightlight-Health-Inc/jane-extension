@@ -21,6 +21,7 @@
 const max_id = null; // null for no max
 const MAX_WAIT_TIME = 60000; // Maximum time to wait for page loads (60 seconds)
 const PAGE_DELAY = 1000; // Standard delay between actions (1 second)
+const MIN_PDF_FETCH_GAP_MS = 2500; // Minimum gap between PDF downloads per thread
 
 // ============================================================================
 // STATE TRACKING
@@ -183,6 +184,16 @@ function sleep(milliseconds) {
 }
 
 /**
+ * Wait for a random time between minMs and maxMs (inclusive)
+ */
+function sleepJitter(minMs, maxMs) {
+  const min = Math.max(0, Number(minMs) || 0);
+  const max = Math.max(min, Number(maxMs) || min);
+  const duration = min + Math.floor(Math.random() * (max - min + 1));
+  return sleep(duration);
+}
+
+/**
  * Cancel all pending waits - used when user clicks stop
  */
 function cancelAllTimeouts() {
@@ -202,6 +213,11 @@ function sendStatus(message, type = 'info') {
     action: 'statusUpdate',
     status: { message: fullMessage, type, threadId }
   });
+
+  // Heartbeat for watchdog: update last activity timestamp per thread
+  try {
+    chrome.storage.local.set({ [getStorageKey('lastHeartbeat')]: Date.now() });
+  } catch (_) {}
 }
 
 /**
@@ -219,12 +235,11 @@ async function detectAndHandleRateLimit() {
       return false; // Not a rate limit page, we're good
     }
 
-    // We hit the rate limit! Pause everything
-    sendStatus('⚠️ Rate limit detected. Pausing all threads for 25 seconds...', 'error');
+    // We hit the rate limit! Pause only this thread, then resume
+    sendStatus('⚠️ Rate limit detected. Pausing this thread for 60 seconds...', 'warning');
     shouldStop = true;
     cancelAllTimeouts();
 
-    // Get our current state so we can resume later
     const clinicName = getClinicNameFromUrl();
     let resumeState = null;
     try {
@@ -232,16 +247,8 @@ async function detectAndHandleRateLimit() {
       resumeState = storage[getStorageKey('scrapingState')] || null;
     } catch (_) {}
 
-    // Tell background to pause everyone and recover
-    await new Promise((resolve) => {
-      chrome.runtime.sendMessage({
-        action: 'globalCooldownAndRecover',
-        clinicName,
-        threadId,
-        resumeState
-      }, () => resolve());
-    });
-
+    // Do a local pause and resume with saved state
+    await pauseAllThreadsAndRetry(clinicName, resumeState, 60_000);
     return true;
   } catch (_) {
     return false;
@@ -287,12 +294,20 @@ async function scheduleRecovery(clinicName, resumeState) {
     
     await sleep(500);
     
-    // Navigate back to the chart page
+    // Navigate back to the chart page (force route reload)
     const url = `https://${clinicName}.janeapp.com/admin/patients/${resumeState.patientId}/chart_entries/${resumeState.chartEntryId}`;
+    shouldStop = false;
     window.location.href = url;
   } else {
     // Otherwise, just ask for new work
-    await requestNextWork(clinicName);
+    // Prefer a light refresh to avoid SPA dead-ends when idle
+    try {
+      shouldStop = false;
+      const currentUrl = window.location.href;
+      window.location.href = currentUrl;
+    } catch (_) {
+      await requestNextWork(clinicName);
+    }
   }
 }
 
@@ -308,6 +323,11 @@ async function pauseAllThreadsAndRetry(clinicName, resumeState, pauseMs = 70_000
     // Local pause ONLY for this thread (do not broadcast)
     shouldStop = true;
     cancelAllTimeouts();
+
+    // Mark global freeze so other threads/UX know the app controls appear frozen
+    try {
+      await chrome.storage.local.set({ forzen: true });
+    } catch (_) {}
 
     // Save our current state so we can resume later
     if (resumeState && typeof resumeState === 'object') {
@@ -524,6 +544,26 @@ async function navigateToCharts(clinicName, patientId) {
   const chartPanels = document.querySelectorAll('div.panel.panel-default.chart-entry.panel-no-gap');
 
   if (!chartsLoaded || chartPanels.length === 0) {
+    // If page is marked frozen, pause and refresh charts route instead of skipping
+    try {
+      const freeze = await chrome.storage.local.get('forzen');
+      if (freeze && freeze.forzen) {
+        sendStatus(`🧊 Charts view appears frozen. Waiting 100s then refreshing charts...`, 'warning');
+        try {
+          await chrome.storage.local.set({
+            [getStorageKey('scrapingState')]: {
+              action: 'requestWork',
+              clinicName,
+              resumePatientId: patientId,
+              savedThreadId: threadId
+            }
+          });
+        } catch (_) {}
+        await sleep(100000);
+        window.location.href = url;
+        return { success: false, paused: true };
+      }
+    } catch (_) {}
     sendStatus(`✓ No charts found for patient ${patientId}`);
     return false;
   }
@@ -580,6 +620,35 @@ async function navigateToCharts(clinicName, patientId) {
 async function checkPatientExists() {
   sendStatus(`🔍 Checking if patient exists...`);
   await sleep(3000); // Wait for page to load
+
+  // If a global freeze was signaled, wait and re-enter the same URL, then resume
+  try {
+    const freeze = await chrome.storage.local.get('forzen');
+    if (freeze && freeze.forzen) {
+      sendStatus(`🧊 Page appears frozen. Waiting 100s then refreshing route...`, 'warning');
+
+      // Save state to resume this patient after reload/navigation
+      try {
+        await chrome.storage.local.set({
+          [getStorageKey('scrapingState')]: {
+            action: 'requestWork',
+            clinicName: getClinicNameFromUrl(),
+            resumePatientId: currentPatientId,
+            savedThreadId: threadId
+          }
+        });
+      } catch (_) {}
+
+      // Small pause, then re-enter same patient URL to refresh SPA route
+      await sleep(100_000);
+      const clinic = getClinicNameFromUrl();
+      if (clinic) {
+        const url = `https://${clinic}.janeapp.com/admin#patients/${currentPatientId}`;
+        window.location.href = url;
+      }
+      return false;
+    }
+  } catch (_) {}
 
   // Wait for loading spinner to disappear
   const spinnerSelector = 'i.icon-spinner.text-muted.icon-spin';
@@ -694,6 +763,18 @@ async function getChartEntries() {
  */
 async function downloadPdfWithCookies(pdfUrl, filename, patientName, patientId) {
   try {
+    // Throttle: ensure minimum gap between fetches per thread
+    try {
+      const wrap = await chrome.storage.local.get(getStorageKey('lastPdfFetchTs'));
+      const lastTs = Number(wrap[getStorageKey('lastPdfFetchTs')] || 0);
+      const now = Date.now();
+      const delta = now - lastTs;
+      if (delta < MIN_PDF_FETCH_GAP_MS) {
+        await sleep(MIN_PDF_FETCH_GAP_MS - delta);
+      }
+      await chrome.storage.local.set({ [getStorageKey('lastPdfFetchTs')]: Date.now() });
+    } catch (_) {}
+
     sendStatus(`⬇️ Fetching PDF from server...`);
 
     // Fetch the PDF file from Jane App
@@ -899,6 +980,29 @@ async function handleChartDownload(state) {
     const currentRetry = retryCount || 0;
     const maxRetries = 3; // Reduced from 10 - keep it simple
 
+    // If global frozen flag is set, pause and force a route refresh before proceeding
+    try {
+      const freeze = await chrome.storage.local.get('forzen');
+      if (freeze && freeze.forzen) {
+        sendStatus(`🧊 Page appears frozen. Waiting 100s then refreshing route...`, 'warning');
+        const resumeState = {
+          action: 'downloadChart',
+          clinicName,
+          patientId,
+          chartEntryId,
+          headerText,
+          patientName,
+          remainingEntries,
+          totalCharts,
+          waitingForPdfPage,
+          retryCount: currentRetry,
+          needsRefresh: true
+        };
+        await pauseAllThreadsAndRetry(clinicName, resumeState, 100000);
+        return;
+      }
+    } catch (_) {}
+
     // PHASE 2: We're on the PDF preview page, find the download link
     if (waitingForPdfPage) {
       if (shouldStop) {
@@ -922,6 +1026,29 @@ async function handleChartDownload(state) {
         }
 
         await sleep(2_000);
+
+        // If page is frozen during waiting, pause and refresh
+        try {
+          const freeze = await chrome.storage.local.get('forzen');
+          if (freeze && freeze.forzen) {
+            sendStatus(`🧊 Page appears frozen. Waiting 100s then refreshing route...`, 'warning');
+            const resumeState = {
+              action: 'downloadChart',
+              clinicName,
+              patientId,
+              chartEntryId,
+              headerText,
+              patientName,
+              remainingEntries,
+              totalCharts,
+              waitingForPdfPage: true,
+              retryCount: currentRetry,
+              needsRefresh: true
+            };
+            await pauseAllThreadsAndRetry(clinicName, resumeState, 100000);
+            return;
+          }
+        } catch (_) {}
 
         // Some clinics append query params to the PDF link (e.g. .pdf?download=1)
         // Use a contains selector instead of ends-with to catch both cases
@@ -1027,8 +1154,8 @@ async function handleChartDownload(state) {
         return;
       }
 
-      // Wait a bit to let the download finish
-      await sleep(1000);
+    // Wait a bit to let the download finish and add light jitter between downloads
+    await sleepJitter(1000, 2000);
 
       if (shouldStop) {
         await chrome.storage.local.remove([getStorageKey('scrapingState')]);
@@ -1046,8 +1173,8 @@ async function handleChartDownload(state) {
           return;
         }
 
-        // Wait a bit between charts
-        await sleep(800);
+        // Wait a bit between charts with jitter to avoid bursts
+        await sleepJitter(800, 2000);
 
         // Download the next chart
         const nextEntry = remainingEntries[0];
@@ -1308,6 +1435,10 @@ async function processOnePatient(clinicName, patientId) {
   const chartsResult = await navigateToCharts(clinicName, patientId);
 
   if (!chartsResult || !chartsResult.success) {
+    if (chartsResult && chartsResult.paused) {
+      // We paused to refresh charts due to frozen state; do not mark as no charts
+      return;
+    }
     sendStatus(`ℹ️ Patient ${patientId} has no charts`);
     // Tell coordinator and get next patient
     try {
@@ -1510,6 +1641,42 @@ async function startScraping(clinicName, email, password) {
 
 // Listen for page loads to resume scraping
 chrome.storage.local.get(null, async (result) => {
+  // Start a watchdog to ensure this thread recovers if idle too long
+  try {
+    const existingTimer = result && result[getStorageKey('watchdogActive')];
+    if (!existingTimer) {
+      await chrome.storage.local.set({ [getStorageKey('watchdogActive')]: true });
+      (function startWatchdog() {
+        const check = async () => {
+          try {
+            const nowWrap = await chrome.storage.local.get([getStorageKey('lastHeartbeat'), 'forzen']);
+            const last = Number(nowWrap[getStorageKey('lastHeartbeat')] || 0);
+            const frozen = !!nowWrap.forzen;
+            const idleMs = Date.now() - last;
+            // If no heartbeat for > 120s or page marked frozen, force navigate to current URL
+            if (idleMs > 120000 || frozen) {
+              const clinic = getClinicNameFromUrl();
+              if (clinic) {
+                const url = window.location.href;
+                // Clear shouldStop to allow resumption after navigate
+                shouldStop = false;
+                window.location.href = url;
+                return; // Stop further checks; page is navigating
+              }
+            }
+          } catch (_) {}
+          setTimeout(check, 15000);
+        };
+        setTimeout(check, 15000);
+      })();
+    }
+  } catch (_) {}
+  // Reset global freeze flag on page load, so it only clears after a reload
+  try {
+    if (result && result.forzen) {
+      await chrome.storage.local.set({ forzen: false });
+    }
+  } catch (_) {}
   // Early global freeze detection only when we're in an active scraping lifecycle
   // i.e., we have a scoped scraping state saved for this thread
   try {
@@ -1522,21 +1689,7 @@ chrome.storage.local.get(null, async (result) => {
     }
   } catch (_) {}
 
-  // Respect global cooldown if one is active
-  try {
-    const now = Date.now();
-    const until = Number(result.globalCooldownUntil || 0);
-    if (until && until > now) {
-      // Enter paused state and idle until cooldown expires
-      shouldStop = true;
-      cancelAllTimeouts();
-      const remainingMs = until - now;
-      sendStatus(`⏸️ Paused for global cooldown...`, 'warning');
-      await new Promise(r => setTimeout(r, remainingMs));
-      // Will be resumed by background via clearStopAndResume; do not proceed here
-      return;
-    }
-  } catch (_) {}
+  // Global cooldown removed; threads self-manage pauses
   // Get thread ID for this tab
   try {
     await new Promise((resolve) => {
@@ -1662,101 +1815,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
     return true;
-  } else if (request.action === 'pauseForCooldown') {
-    // Pause without clearing state - save current patient if we're working on one
-    shouldStop = true;
-    cancelAllTimeouts();
-    sendStatus('⏸️ Paused for global cooldown...', 'warning');
-
-    // Save current patient state so we can resume with same patient
-    (async () => {
-      try {
-        const existing = await chrome.storage.local.get(getStorageKey('scrapingState'));
-        const currentState = existing[getStorageKey('scrapingState')];
-
-        // If we don't have a saved state but we have a currentPatientId, save it
-        if (!currentState && currentPatientId) {
-          await chrome.storage.local.set({
-            [getStorageKey('scrapingState')]: {
-              action: 'requestWork',
-              clinicName: getClinicNameFromUrl(),
-              resumePatientId: currentPatientId,
-              savedThreadId: threadId
-            }
-          });
-        }
-      } catch (e) {
-        console.error('Failed to save pause state:', e);
-      }
-    })();
-
-    sendResponse({ ok: true });
-    return true;
-  } else if (request.action === 'clearStopAndResume') {
-    // Check if user stopped or if we have saved state to resume
-    chrome.storage.local.get(['stopRequested', 'userRequestedStop', getStorageKey('scrapingState')], (flags) => {
-      if (flags && (flags.stopRequested || flags.userRequestedStop)) {
-        sendStatus('⏹️ Not resuming - user stopped scraping', 'info');
-        sendResponse({ ok: false, skipped: true });
-        return;
-      }
-
-      shouldStop = false;
-      const pendingState = flags && flags[getStorageKey('scrapingState')];
-
-      if (pendingState && pendingState.action) {
-        // Check if we need to refresh the page before resuming
-        if (pendingState.needsRefresh) {
-          sendStatus('🔄 Refreshing page after cooldown...', 'info');
-          sendResponse({ ok: true });
-
-          // Remove the needsRefresh flag and reload
-          (async () => {
-            await chrome.storage.local.set({
-              [getStorageKey('scrapingState')]: {
-                ...pendingState,
-                needsRefresh: false
-              }
-            });
-            await sleep(500);
-            window.location.reload();
-          })();
-          return;
-        }
-
-        // We have saved state - let page reload handle it
-        sendStatus('🔄 Resuming with saved state...', 'info');
-        sendResponse({ ok: true });
-        // Actively resume without requiring a reload
-        (async () => {
-          try {
-            await sleep(200);
-            const stateNow = pendingState; // use captured state
-            if (stateNow.action === 'downloadChart') {
-              await handleChartDownload(stateNow);
-            } else if (stateNow.action === 'postLogin') {
-              await handlePostLogin(stateNow);
-            } else if (stateNow.action === 'requestWork') {
-              await chrome.storage.local.remove([getStorageKey('scrapingState')]);
-              const clinic = request.clinicName || getClinicNameFromUrl();
-              await requestNextWork(clinic);
-            }
-          } catch (_) {}
-        })();
-        return;
-      }
-
-      // No saved state - request new work
-      sendStatus('🔄 Resuming - requesting new work...', 'info');
-      sendResponse({ ok: true });
-
-      (async () => {
-        const clinicName = request.clinicName || getClinicNameFromUrl();
-        await sleep(1000);
-        await requestNextWork(clinicName);
-      })();
-    });
-    return true;
+  // Global pause/resume message handlers removed
   }
 });
 
