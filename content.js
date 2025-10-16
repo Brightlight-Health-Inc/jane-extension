@@ -22,6 +22,8 @@ const max_id = null; // null for no max
 const MAX_WAIT_TIME = 60000; // Maximum time to wait for page loads (60 seconds)
 const PAGE_DELAY = 1000; // Standard delay between actions (1 second)
 const MIN_PDF_FETCH_GAP_MS = 2500; // Minimum gap between PDF downloads per thread
+const MAX_PATIENT_CHECK_RETRIES = 3; // Retries before concluding not found/timeout
+const MAX_CHARTS_CHECK_RETRIES = 3;  // Retries before concluding no charts/timeout
 
 // ============================================================================
 // STATE TRACKING
@@ -41,6 +43,40 @@ function getStorageKey(key) {
 // Current patient's files (just for tracking, not used for zipping anymore)
 let currentPatientFiles = [];
 let currentPatientDownloadIds = [];
+
+// Retry tracking per patient (persisted so retries survive reloads)
+async function getRetryCounts(patientId) {
+  try {
+    const key = getStorageKey('retryCounts');
+    const data = await chrome.storage.local.get([key]);
+    const map = data[key] || {};
+    return map[patientId] || { patientCheck: 0, charts: 0 };
+  } catch (_) {
+    return { patientCheck: 0, charts: 0 };
+  }
+}
+
+async function setRetryCounts(patientId, counts) {
+  try {
+    const key = getStorageKey('retryCounts');
+    const data = await chrome.storage.local.get([key]);
+    const map = data[key] || {};
+    map[patientId] = counts;
+    await chrome.storage.local.set({ [key]: map });
+  } catch (_) {}
+}
+
+async function resetRetryCounts(patientId) {
+  try {
+    const key = getStorageKey('retryCounts');
+    const data = await chrome.storage.local.get([key]);
+    const map = data[key] || {};
+    if (map[patientId]) {
+      delete map[patientId];
+      await chrome.storage.local.set({ [key]: map });
+    }
+  } catch (_) {}
+}
 
 // ============================================================================
 // INDEXEDDB STORAGE (persists files across page navigations)
@@ -561,11 +597,15 @@ async function navigateToCharts(clinicName, patientId) {
         } catch (_) {}
         await sleep(100000);
         window.location.href = url;
-        return { success: false, paused: true };
+        return { success: false, paused: true, reason: 'timeout' };
       }
     } catch (_) {}
+    if (!chartsLoaded) {
+      sendStatus(`⚠️ Charts load timed out for patient ${patientId}`);
+      return { success: false, reason: 'timeout' };
+    }
     sendStatus(`✓ No charts found for patient ${patientId}`);
-    return false;
+    return { success: false, reason: 'no_charts' };
   }
 
   sendStatus(`✓ Charts page loaded successfully`);
@@ -615,7 +655,7 @@ async function navigateToCharts(clinicName, patientId) {
 
 /**
  * Check if the patient exists on their page
- * Returns true if patient exists, false if not found
+ * Returns { exists: boolean, reason?: 'timeout'|'not_found', paused?: boolean }
  */
 async function checkPatientExists() {
   sendStatus(`🔍 Checking if patient exists...`);
@@ -646,7 +686,7 @@ async function checkPatientExists() {
         const url = `https://${clinic}.janeapp.com/admin#patients/${currentPatientId}`;
         window.location.href = url;
       }
-      return false;
+      return { exists: false, reason: 'timeout', paused: true };
     }
   } catch (_) {}
 
@@ -658,7 +698,7 @@ async function checkPatientExists() {
   while (document.querySelector(spinnerSelector)) {
     if (Date.now() - startTime > maxWaitTime) {
       sendStatus(`⚠️ Patient check timed out`, 'warning');
-      return false; // Spinner never went away
+      return { exists: false, reason: 'timeout' }; // Spinner never went away
     }
     await sleep(500);
   }
@@ -667,7 +707,7 @@ async function checkPatientExists() {
   const errorElement = document.querySelector('.alert-danger, .error-message');
   if (errorElement) {
     sendStatus(`⚠️ Patient not found (error message shown)`, 'error');
-    return false;
+    return { exists: false, reason: 'not_found' };
   }
 
   // Check if patient name element is on the page
@@ -675,10 +715,10 @@ async function checkPatientExists() {
   
   if (nameElement) {
     sendStatus(`✓ Patient found`);
-    return true;
+    return { exists: true };
   } else {
     sendStatus(`⚠️ Patient not found (no name element)`, 'error');
-    return false;
+    return { exists: false, reason: 'not_found' };
   }
 }
 
@@ -1409,21 +1449,39 @@ async function processOnePatient(clinicName, patientId) {
   if (shouldStop) return;
   await navigateToPatient(clinicName, patientId);
   
-  // Step 2: Check if patient exists
+  // Step 2: Check if patient exists with retries
   if (shouldStop) return;
-  const patientExists = await checkPatientExists();
-  
-  if (!patientExists) {
-    sendStatus(`⚠️ Patient ${patientId} not found`);
-    // Tell coordinator and get next patient
+  let existsResult = { exists: false, reason: 'not_found' };
+  let counts = await getRetryCounts(patientId);
+  for (let attempt = 1; attempt <= MAX_PATIENT_CHECK_RETRIES; attempt++) {
+    existsResult = await checkPatientExists();
+    if (existsResult?.exists) break;
+    counts.patientCheck = attempt;
+    await setRetryCounts(patientId, counts);
+    // If paused due to freeze, stop here and allow resume
+    if (existsResult?.paused) return;
+    const reason = existsResult?.reason || 'unknown';
+    sendStatus(`🔁 Retry patient existence check ${attempt}/${MAX_PATIENT_CHECK_RETRIES} (reason: ${reason})`, 'warning');
+    await sleep(2000 + Math.min(5000, attempt * 1000));
+    // Re-navigate to ensure fresh state between attempts
+    await navigateToPatient(clinicName, patientId);
+  }
+  if (!existsResult?.exists) {
+    const reason = existsResult?.reason || 'not_found';
+    const human = reason === 'timeout' ? 'Patient check timed out' : 'Patient not found';
+    sendStatus(`⚠️ ${human} after ${counts.patientCheck} retr${counts.patientCheck === 1 ? 'y' : 'ies'} - skipping`, 'warning');
     try {
       await new Promise((resolve) => {
         chrome.runtime.sendMessage({ action: 'patientNotFound', threadId, patientId }, resolve);
       });
     } catch (_) {}
+    await resetRetryCounts(patientId);
     await requestNextWork(clinicName);
     return;
   }
+  // Reset patient-check retries on success
+  counts.patientCheck = 0;
+  await setRetryCounts(patientId, counts);
 
   // Step 3: Get patient name
   if (shouldStop) return;
@@ -1432,23 +1490,36 @@ async function processOnePatient(clinicName, patientId) {
 
   // Step 4: Navigate to charts page
   if (shouldStop) return;
-  const chartsResult = await navigateToCharts(clinicName, patientId);
-
+  // Step 4: Navigate to charts with retries and explicit reasons
+  let chartsResult = { success: false, reason: 'no_charts' };
+  for (let attempt = 1; attempt <= MAX_CHARTS_CHECK_RETRIES; attempt++) {
+    chartsResult = await navigateToCharts(clinicName, patientId);
+    if (chartsResult && chartsResult.success) break;
+    // If paused due to freeze, stop here and allow resume
+    if (chartsResult && chartsResult.paused) return;
+    counts.charts = attempt;
+    await setRetryCounts(patientId, counts);
+    const reason = chartsResult?.reason || 'unknown';
+    const msg = reason === 'timeout' ? 'charts check timed out' : 'no charts yet';
+    sendStatus(`🔁 Retry charts check ${attempt}/${MAX_CHARTS_CHECK_RETRIES} (${msg})`, 'warning');
+    await sleep(2000 + Math.min(8000, attempt * 2000));
+  }
   if (!chartsResult || !chartsResult.success) {
-    if (chartsResult && chartsResult.paused) {
-      // We paused to refresh charts due to frozen state; do not mark as no charts
-      return;
-    }
-    sendStatus(`ℹ️ Patient ${patientId} has no charts`);
-    // Tell coordinator and get next patient
+    const reason = chartsResult?.reason || 'no_charts';
+    const human = reason === 'timeout' ? 'Patient charts check timed out' : 'Patient has no charts';
+    sendStatus(`ℹ️ ${human} after ${counts.charts} retr${counts.charts === 1 ? 'y' : 'ies'} - skipping`);
     try {
       await new Promise((resolve) => {
         chrome.runtime.sendMessage({ action: 'patientNoCharts', threadId, patientId }, resolve);
       });
     } catch (_) {}
+    await resetRetryCounts(patientId);
     await requestNextWork(clinicName);
     return;
   }
+  // Reset charts retries on success
+  counts.charts = 0;
+  await setRetryCounts(patientId, counts);
 
   // Step 5: Get all chart entries
   if (shouldStop) return;
@@ -1790,8 +1861,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       sendStatus(`🚀 Starting scraping process...`);
 
-      // Simple: always save credentials and navigate to login page
-      // This ensures predictable starting point
+      // Save credentials for this thread
       await chrome.storage.local.set({
         [getStorageKey('credentials')]: { clinicName, email, password }
       });
@@ -1805,9 +1875,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const loginFormPresent = !!document.querySelector('input[name="auth_key"], input#auth_key');
 
       if (loginFormPresent) {
-        // Need to login
+        // Use startScraping so post-login state is saved and resume works after reload
         sendStatus(`🔐 Logging in...`);
-        await performLogin(clinicName, email, password);
+        await startScraping(clinicName, email, password);
       } else {
         // Already logged in - just request work
         sendStatus(`✅ Already logged in!`);
