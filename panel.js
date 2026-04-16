@@ -16,87 +16,68 @@
 // ============================================================================
 
 // Get references to all the UI elements we need
+const chartsBtn = document.getElementById('charts-btn');
+const migrationBtn = document.getElementById('appointments-btn');
 const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
-const testBtn = document.getElementById('test-btn');
 const statusMessages = document.getElementById('status-messages');
 const statusCount = document.getElementById('status-count');
 const formSection = document.getElementById('form-section');
 const statusContainer = document.getElementById('status-container');
 
+// Form field groups
+const chartsFields = document.getElementById('charts-fields');
+const chartsFields2 = document.getElementById('charts-fields-2');
+const appointmentsFields = document.getElementById('appointments-fields');
+const appointmentsFields2 = document.getElementById('appointments-fields-2');
+
+// Current export mode
+let currentMode = null; // 'charts' or 'migration'
+let pendingMigration = false;
+const MAX_THREADS = 8;
+
 // Stats display elements
 const statsPdfs = document.getElementById('stats-pdfs');
 const statsUsers = document.getElementById('stats-users');
-const statsElapsed = document.getElementById('stats-elapsed');
-const statsAvgUser = document.getElementById('stats-avg-user');
-const statsAvgPdf = document.getElementById('stats-avg-pdf');
 
 // ============================================================================
 // STATE TRACKING
 // ============================================================================
 
 // Message counter
-let messageCount = 1; // Start at 1 for the initial "Ready" message
+let messageCount = 0; // Count error messages only
+const MAX_ERROR_LOG_ENTRIES = 500;
 
 // Stats tracking
-let runStartTime = null;        // When did the run start?
-let pdfCount = 0;                // How many PDFs have we downloaded?
-let userCount = 0;               // How many patients have we processed?
-let userStartTime = null;        // When did we start the current patient?
-let totalUserDurationMs = 0;     // Total time spent on all patients
-let totalPdfDurationMs = 0;      // Total time spent on all PDFs
-let lastPdfTime = null;          // When was the last PDF downloaded?
+let pdfCount = 0;   // How many PDFs have we downloaded?
+let userCount = 0;  // How many patients have we processed?
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
 /**
- * Format milliseconds as HH:MM:SS
- */
-function formatDuration(ms) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-  const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-  const seconds = String(totalSeconds % 60).padStart(2, '0');
-  return `${hours}:${minutes}:${seconds}`;
-}
-
-/**
  * Reset all stats to zero for a new run
  */
 function resetStats() {
-  runStartTime = Date.now();
   pdfCount = 0;
   userCount = 0;
-  userStartTime = null;
-  totalUserDurationMs = 0;
-  totalPdfDurationMs = 0;
-  lastPdfTime = null;
+  messageCount = 0;
+  statusMessages.innerHTML = '';
+  statusCount.textContent = '0 errors';
   
   // Update UI
   statsPdfs.textContent = '0';
   statsUsers.textContent = '0';
-  statsElapsed.textContent = '00:00:00';
-  statsAvgUser.textContent = '-';
-  statsAvgPdf.textContent = '-';
 }
-
-/**
- * Update the elapsed time display (called every second)
- */
-function tickElapsed() {
-  if (!runStartTime) return;
-  statsElapsed.textContent = formatDuration(Date.now() - runStartTime);
-}
-
-// Update elapsed time every second
-setInterval(tickElapsed, 1000);
 
 /**
  * Add a status message to the log
  */
 function updateStatus(message, type = 'info') {
+  // Only show errors in the log
+  if (type !== 'error') return;
+
   // Create a timestamp for this message
   const now = new Date();
   const timestamp = now.toLocaleTimeString('en-US', {
@@ -114,10 +95,14 @@ function updateStatus(message, type = 'info') {
   // Add it to the log
   statusMessages.appendChild(messageElement);
 
+  while (statusMessages.children.length > MAX_ERROR_LOG_ENTRIES) {
+    statusMessages.removeChild(statusMessages.firstElementChild);
+  }
+
   // Update message counter
   messageCount++;
   const plural = messageCount !== 1 ? 's' : '';
-  statusCount.textContent = `${messageCount} message${plural}`;
+  statusCount.textContent = `${messageCount} error${plural}`;
 
   // Auto-scroll only if user is already at/near the bottom (not manually scrolled up)
   const isNearBottom = statusMessages.scrollHeight - statusMessages.scrollTop <= statusMessages.clientHeight + 50;
@@ -127,67 +112,166 @@ function updateStatus(message, type = 'info') {
 }
 
 // ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Show fields for charts export
+ */
+function showChartsFields() {
+  chartsFields.style.display = 'block';
+  chartsFields2.style.display = 'block';
+  appointmentsFields.style.display = 'none';
+  appointmentsFields2.style.display = 'none';
+  currentMode = 'charts';
+}
+
+/**
+ * Show fields for migration export (appointments + patients)
+ */
+function showMigrationFields() {
+  chartsFields.style.display = 'none';
+  chartsFields2.style.display = 'none';
+  appointmentsFields.style.display = 'block';
+  appointmentsFields2.style.display = 'block';
+  currentMode = 'migration';
+}
+
+// ============================================================================
 // EVENT HANDLERS
 // ============================================================================
 
 /**
- * Start button - validates form and starts scraping
+ * Charts button - shows charts form fields
+ */
+chartsBtn.addEventListener('click', () => {
+  showChartsFields();
+  chartsBtn.style.display = 'none';
+  migrationBtn.style.display = 'none';
+  startBtn.style.display = 'block';
+});
+
+/**
+ * Migration button - shows migration form fields
+ */
+migrationBtn.addEventListener('click', () => {
+  showMigrationFields();
+  chartsBtn.style.display = 'none';
+  migrationBtn.style.display = 'none';
+  startBtn.style.display = 'block';
+});
+
+/**
+ * Start button - validates form and starts export
  */
 startBtn.addEventListener('click', async () => {
-  // Get form values
+  // Get common form values
   const clinicName = document.getElementById('clinic-name').value.trim();
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value.trim();
-  const threadCount = parseInt(document.getElementById('thread-count').value, 10);
-  const maxIdInput = document.getElementById('max-id').value.trim();
-  const maxId = maxIdInput ? parseInt(maxIdInput, 10) : null;
 
-  // Validate inputs
   if (!clinicName || !email || !password) {
-    updateStatus('Please fill in all fields', 'error');
+    updateStatus('Please fill in clinic name, email, and password', 'error');
     return;
   }
 
-  if (!threadCount || threadCount < 1 || threadCount > 5) {
-    updateStatus('Thread count must be between 1 and 5', 'error');
-    return;
-  }
+  if (currentMode === 'charts') {
+    // Validate charts-specific fields
+    const threadCount = parseInt(document.getElementById('thread-count').value, 10);
+    const maxIdInput = document.getElementById('max-id').value.trim();
+    const maxId = maxIdInput ? parseInt(maxIdInput, 10) : null;
 
-  // Switch UI to "running" mode
-  formSection.classList.add('hidden');
-  statusContainer.classList.add('expanded');
-  startBtn.style.display = 'none';
-  stopBtn.style.display = 'block';
-  stopBtn.disabled = false;
-
-  // Reset stats
-  resetStats();
-
-  const plural = threadCount > 1 ? 's' : '';
-  updateStatus(`Starting with ${threadCount} thread${plural}...`);
-
-  // Tell background.js to start the worker threads
-  chrome.runtime.sendMessage({
-    action: 'startThreads',
-    clinicName,
-    email,
-    password,
-    startingIndex: 1,
-    numThreads: threadCount,
-    maxId,
-    resume: false
-  }, (response) => {
-    if (chrome.runtime.lastError) {
-      updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
+    if (!threadCount || threadCount < 1 || threadCount > MAX_THREADS) {
+      updateStatus(`Thread count must be between 1 and ${MAX_THREADS}`, 'error');
       return;
     }
-    
-    if (!response || !response.ok) {
-      updateStatus('❌ Could not start: ' + (response?.error || 'unknown'), 'error');
-    } else {
+
+    // Switch UI to "running" mode
+    formSection.classList.add('hidden');
+    statusContainer.classList.add('expanded');
+    startBtn.style.display = 'none';
+    stopBtn.style.display = 'block';
+    stopBtn.disabled = false;
+
+    // Reset stats
+    resetStats();
+
+    const plural = threadCount > 1 ? 's' : '';
+    updateStatus(`Starting charts export with ${threadCount} thread${plural}...`);
+
+    // Tell background.js to start the worker threads
+    chrome.runtime.sendMessage({
+      action: 'startThreads',
+      clinicName,
+      email,
+      password,
+      startingIndex: 1,
+      numThreads: threadCount,
+      maxId,
+      resume: false
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
+        return;
+      }
+      
+      if (!response || !response.ok) {
+        updateStatus('❌ Could not start: ' + (response?.error || 'unknown'), 'error');
+      } else {
       updateStatus(`✅ ${threadCount} thread${plural} started`);
+      }
+    });
+
+  } else if (currentMode === 'migration') {
+    // Validate appointments-specific fields (used for migration appointments export)
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+
+    if (!startDate || !endDate) {
+      updateStatus('Please select both start and end dates', 'error');
+      return;
     }
-  });
+
+    if (new Date(startDate) > new Date(endDate)) {
+      updateStatus('Start date must be before end date', 'error');
+      return;
+    }
+
+    // Switch UI to "running" mode
+    formSection.classList.add('hidden');
+    statusContainer.classList.add('expanded');
+    startBtn.style.display = 'none';
+    stopBtn.style.display = 'block';
+    stopBtn.disabled = false;
+
+    // Reset stats
+    resetStats();
+
+    updateStatus('Starting migration export (appointments then patients)...');
+
+    pendingMigration = true;
+
+    // Tell background.js to start migration flow
+    // (clinicName, email, password are already set to hardcoded values above)
+    chrome.runtime.sendMessage({
+      action: 'startMigration',
+      clinicName,
+      email,
+      password,
+      startDate,
+      endDate
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
+        pendingMigration = false;
+        return;
+      }
+      if (!response || !response.ok) {
+        updateStatus('❌ Could not start migration: ' + (response?.error || 'unknown'), 'error');
+        pendingMigration = false;
+      }
+    });
+  }
 });
 
 /**
@@ -210,74 +294,6 @@ stopBtn.addEventListener('click', async () => {
   });
 });
 
-/**
- * Test button - runs a short test from ID 1 to 5
- */
-testBtn.addEventListener('click', async () => {
-  // Get form values
-  const clinicName = document.getElementById('clinic-name').value.trim();
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value.trim();
-  const threadCount = parseInt(document.getElementById('thread-count').value, 10) || 1;
-
-  // Validate inputs
-  if (!clinicName || !email || !password) {
-    updateStatus('Please fill in all fields to run the test', 'error');
-    return;
-  }
-
-  // Validate threads
-  if (!threadCount || threadCount < 1 || threadCount > 5) {
-    updateStatus('Thread count must be between 1 and 5', 'error');
-    return;
-  }
-
-  // Switch UI to "running" mode
-  formSection.classList.add('hidden');
-  statusContainer.classList.add('expanded');
-  startBtn.style.display = 'none';
-  stopBtn.style.display = 'block';
-  stopBtn.disabled = false;
-
-  // Reset stats
-  resetStats();
-
-  const plural = threadCount > 1 ? 's' : '';
-  updateStatus(`Starting test run (IDs 1–5) with ${threadCount} thread${plural}...`);
-
-  chrome.runtime.sendMessage({
-    action: 'startThreads',
-    clinicName,
-    email,
-    password,
-    startingIndex: 1,
-    numThreads: threadCount,
-    maxId: 5,
-    resume: false
-  }, (response) => {
-    if (chrome.runtime.lastError) {
-      updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
-      return;
-    }
-    if (!response || !response.ok) {
-      updateStatus('❌ Could not start: ' + (response?.error || 'unknown'), 'error');
-    } else {
-      updateStatus('✅ Test run started');
-    }
-  });
-});
-
-/**
- * Auto-stop if user closes the side panel
- */
-window.addEventListener('beforeunload', () => {
-  try {
-    chrome.storage.local.set({ stopRequested: true });
-    chrome.runtime.sendMessage({ action: 'broadcastStop' });
-  } catch (_) {
-    // Ignore errors on unload
-  }
-});
 
 /**
  * Listen for status messages from worker threads
@@ -287,47 +303,22 @@ chrome.runtime.onMessage.addListener((request) => {
   if (request.action === 'statusUpdate') {
     const message = request.status.message || '';
     
-    // Display the message
+    // Display the message (errors only)
     updateStatus(message, request.status.type);
 
     // Track stats based on message content
     // (Messages include [T1], [T2] prefixes from different threads)
     
-    // New patient started
-    if (message.includes('📋 Processing patient ')) {
-      userStartTime = Date.now();
-    }
-    
     // Patient completed
     if (message.includes('✅ Completed patient ')) {
       userCount++;
       statsUsers.textContent = String(userCount);
-      
-      if (userStartTime) {
-        totalUserDurationMs += (Date.now() - userStartTime);
-        userStartTime = null;
-      }
     }
 
     // PDF downloaded
     if (message.includes('✅ Downloaded: ')) {
       pdfCount++;
       statsPdfs.textContent = String(pdfCount);
-      
-      if (lastPdfTime) {
-        totalPdfDurationMs += (Date.now() - lastPdfTime);
-      }
-      lastPdfTime = Date.now();
-    }
-
-    // Update average times
-    if (userCount > 0) {
-      const avgUserTime = Math.floor(totalUserDurationMs / userCount);
-      statsAvgUser.textContent = formatDuration(avgUserTime);
-    }
-    if (pdfCount > 0) {
-      const avgPdfTime = Math.floor(totalPdfDurationMs / pdfCount);
-      statsAvgPdf.textContent = formatDuration(avgPdfTime);
     }
 
     // Check if scraping is done
@@ -338,10 +329,25 @@ chrome.runtime.onMessage.addListener((request) => {
       // Wait 2 seconds then reset UI
       setTimeout(() => {
         stopBtn.style.display = 'none';
-        startBtn.style.display = 'block';
+        startBtn.style.display = 'none';
+        chartsBtn.style.display = 'block';
+        migrationBtn.style.display = 'block';
         formSection.classList.remove('hidden');
         statusContainer.classList.remove('expanded');
+        currentMode = null;
       }, 2000);
+    }
+
+    // Reset UI when migration flow finishes
+    if (pendingMigration && message.includes('Migration completed')) {
+      pendingMigration = false;
+      stopBtn.style.display = 'none';
+      startBtn.style.display = 'none';
+      chartsBtn.style.display = 'block';
+      migrationBtn.style.display = 'block';
+      formSection.classList.remove('hidden');
+      statusContainer.classList.remove('expanded');
+      currentMode = null;
     }
   }
 });
@@ -366,7 +372,9 @@ chrome.runtime.onMessage.addListener((request) => {
       
       formSection.classList.add('hidden');
       statusContainer.classList.add('expanded');
-      startBtn.style.display = 'none';
+    chartsBtn.style.display = 'none';
+    migrationBtn.style.display = 'none';
+    startBtn.style.display = 'none';
       stopBtn.style.display = 'block';
       stopBtn.disabled = false;
       

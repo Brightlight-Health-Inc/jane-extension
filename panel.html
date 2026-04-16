@@ -245,7 +245,6 @@
       margin-bottom: 4px;
     }
     .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    @media (min-width: 720px) { .stats-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
     .stat { background: var(--card); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 6px 14px var(--shadow); }
     .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
     .stat .value { font-size: 18px; font-weight: 800; margin-top: 2px; color: var(--text); }
@@ -258,17 +257,24 @@
   </div>
 
   <div class="content">
-    <div id="form-section" class="form-section">
-      <div class="info-box">
-        <strong>📁 Download Location</strong>
-        Files are saved under <strong>Downloads/jane-scraper/</strong>
+    <div id="stats-container" class="info-box" style="margin-bottom: 16px;">
+      <div class="stats-grid" style="margin-top: 0;">
+        <div class="stat">
+          <div class="label">PDFs Downloaded</div>
+          <div class="value" id="stats-pdfs">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Users Finished</div>
+          <div class="value" id="stats-users">0</div>
+        </div>
       </div>
+    </div>
 
+    <div id="form-section" class="form-section">
       <div class="form-grid">
         <div class="form-group col-span-2">
           <label for="clinic-name">Clinic Name</label>
           <input type="text" id="clinic-name" placeholder="e.g., yourClinicName" value="">
-          <small style="display: block; margin-top: 4px; color: #6b7280; font-size: 11px;">Enter your clinic subdomain from yourClinicName.janeapp.com</small>
         </div>
 
         <div class="form-group">
@@ -281,59 +287,41 @@
           <input type="password" id="password" placeholder="Your Jane App password" value="">
         </div>
 
-        <div class="form-group col-span-2">
-          <label for="thread-count">Number of Threads (1-5)</label>
-          <input type="number" id="thread-count" min="1" max="5" value="1">
-          <small style="display: block; margin-top: 4px; color: #6b7280; font-size: 11px;">💡 We recommend 4 threads for optimal performance. Note: More threads = slower PC performance for other tasks</small>
+        <!-- Charts-specific fields -->
+        <div id="charts-fields" class="form-group col-span-2" style="display: none;">
+          <label for="thread-count">Number of Threads (1-8)</label>
+          <input type="number" id="thread-count" min="1" max="8" value="1">
         </div>
 
-        <div class="form-group col-span-2">
+        <div id="charts-fields-2" class="form-group col-span-2" style="display: none;">
           <label for="max-id">Max Patient ID (optional)</label>
           <input type="number" id="max-id" min="1" placeholder="Leave empty for no limit" value="">
-          <small style="display: block; margin-top: 4px; color: #6b7280; font-size: 11px;">Stops automatically when this patient ID has been processed.</small>
         </div>
-      </div>
 
-      <div class="divider"></div>
-    </div>
+        <!-- Appointments-specific fields -->
+        <div id="appointments-fields" class="form-group col-span-2" style="display: none;">
+          <label for="start-date">Start Date</label>
+          <input type="date" id="start-date" value="">
+        </div>
 
-    <div id="stats-container" class="info-box" style="margin-bottom: 12px;">
-      <strong>📊 Run Stats</strong>
-      <div class="stats-grid" style="margin-top: 8px;">
-        <div class="stat">
-          <div class="label">PDFs</div>
-          <div class="value" id="stats-pdfs">0</div>
-        </div>
-        <div class="stat">
-          <div class="label">Users</div>
-          <div class="value" id="stats-users">0</div>
-        </div>
-        <div class="stat">
-          <div class="label">Elapsed</div>
-          <div class="value" id="stats-elapsed">00:00:00</div>
-        </div>
-        <div class="stat">
-          <div class="label">Avg Time/User</div>
-          <div class="value" id="stats-avg-user">-</div>
-        </div>
-        <div class="stat">
-          <div class="label">Avg Time/PDF</div>
-          <div class="value" id="stats-avg-pdf">-</div>
+        <div id="appointments-fields-2" class="form-group col-span-2" style="display: none;">
+          <label for="end-date">End Date</label>
+          <input type="date" id="end-date" value="">
         </div>
       </div>
     </div>
 
-    <button id="start-btn" class="btn-primary">▶ Start Export</button>
-    <button id="test-btn" class="btn-primary" style="background:#2563eb;"> Test (IDs 1–5)</button>
+    <button id="charts-btn" class="btn-primary">▶ Export Charts</button>
+    <button id="appointments-btn" class="btn-primary" style="background:#0ea5e9;">📦 Migration (Appts + Patients)</button>
+    <button id="start-btn" class="btn-primary" style="display:none;">▶ Start</button>
     <button id="stop-btn" class="btn-primary btn-danger" style="display:none;">■ Stop Export</button>
 
     <div id="status-container" class="status-container">
       <div class="status-header">
-        <div class="status-label">Status Log</div>
-        <div class="status-count" id="status-count">0 messages</div>
+        <div class="status-label">Errors</div>
+        <div class="status-count" id="status-count">0 errors</div>
       </div>
       <div class="status-messages" id="status-messages">
-        <div class="status-message info">Ready to export charts...</div>
       </div>
     </div>
   </div>

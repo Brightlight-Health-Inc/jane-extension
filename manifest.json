@@ -27,13 +27,30 @@
     "default_title": "Open Chart Assistant"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/background-main.js",
+    "type": "module"
   },
   "content_scripts": [
     {
       "matches": ["https://*.janeapp.com/*"],
-      "js": ["content.js"],
+      "js": ["src/content/content-main.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/shared/*.js",
+        "src/shared/utils/*.js",
+        "src/content/state/*.js",
+        "src/content/auth/*.js",
+        "src/content/navigation/*.js",
+        "src/content/scraping/*.js",
+        "src/content/scraping/extractors/*.js",
+        "src/content/download/*.js",
+        "src/content/recovery/*.js"
+      ],
+      "matches": ["https://*.janeapp.com/*"]
     }
   ]
 }
