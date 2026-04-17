@@ -162,6 +162,28 @@ migrationBtn.addEventListener('click', () => {
 });
 
 /**
+ * Ask Chrome for host permission on a specific clinic's janeapp.com subdomain.
+ * The manifest declares the broad pattern under optional_host_permissions so
+ * the extension ships with no standing access to any Jane clinic; this prompt
+ * is the moment the user grants read/write for exactly the clinic they're
+ * about to export. Chrome remembers the grant across sessions.
+ *
+ * Must be called synchronously from a user-gesture handler (click) — Chrome
+ * silently returns false otherwise.
+ */
+async function ensureClinicPermission(clinicName) {
+  const origin = `https://${clinicName}.janeapp.com/*`;
+  try {
+    const already = await chrome.permissions.contains({ origins: [origin] });
+    if (already) return true;
+    return await chrome.permissions.request({ origins: [origin] });
+  } catch (error) {
+    updateStatus(`❌ Permission check failed: ${error.message}`, 'error');
+    return false;
+  }
+}
+
+/**
  * Start button - validates form and starts export
  */
 startBtn.addEventListener('click', async () => {
@@ -172,6 +194,15 @@ startBtn.addEventListener('click', async () => {
 
   if (!clinicName || !email || !password) {
     updateStatus('Please fill in clinic name, email, and password', 'error');
+    return;
+  }
+
+  // Request host permission for this specific clinic subdomain. Must happen
+  // inside the click handler (user gesture) and before any long async work
+  // that would invalidate the gesture.
+  const permitted = await ensureClinicPermission(clinicName);
+  if (!permitted) {
+    updateStatus(`❌ Permission required for ${clinicName}.janeapp.com — can't proceed`, 'error');
     return;
   }
 

@@ -17,7 +17,7 @@
     "storage",
     "downloads"
   ],
-  "host_permissions": [
+  "optional_host_permissions": [
     "https://*.janeapp.com/*"
   ],
   "side_panel": {
