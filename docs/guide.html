@@ -2,28 +2,120 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Jane Chart Assistant — Quick Start Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>Jane Chart Assistant Quick Start Guide</title>
 <style>
+  :root {
+    --brand: #354277;
+    --brand-darker: #2a345e;
+    --accent: #2563eb;
+    --accent-light: #3b82f6;
+    --accent-soft: #eff6ff;
+    --foreground: #0a0a0a;
+    --foreground-soft: #374151;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --border-soft: #f3f4f6;
+    --card-bg: #f9fafb;
+    --background: #ffffff;
+    --success: #059669;
+    --success-soft: #ecfdf5;
+    --warn: #d97706;
+    --warn-soft: #fef3c7;
+    --error: #dc2626;
+    --error-soft: #fef2f2;
+  }
   @page { size: Letter; margin: 0.75in; }
   * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    font-size: 11pt;
-    line-height: 1.55;
-    color: #1f2937;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.6;
+    color: var(--foreground);
+    background: var(--background);
     margin: 0;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
-  h1 { font-size: 26pt; font-weight: 700; color: #1f2937; margin: 0 0 4px 0; letter-spacing: -0.5px; }
-  h2 { font-size: 16pt; font-weight: 700; color: #1f2937; margin: 24px 0 8px 0; border-bottom: 2px solid #e5e7eb; padding-bottom: 4px; page-break-after: avoid; }
-  h3 { font-size: 13pt; font-weight: 700; color: #374151; margin: 18px 0 6px 0; page-break-after: avoid; }
-  p { margin: 0 0 10px 0; }
-  ul, ol { margin: 6px 0 12px 0; padding-left: 22px; }
-  li { margin-bottom: 4px; }
-  code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 10pt; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; color: #111827; }
-  pre { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 9.5pt; line-height: 1.4; color: #111827; overflow-x: auto; page-break-inside: avoid; }
-  table { width: 100%; border-collapse: collapse; margin: 8px 0 14px 0; font-size: 10pt; page-break-inside: avoid; }
-  th, td { border: 1px solid #e5e7eb; padding: 7px 10px; text-align: left; vertical-align: top; }
-  th { background: #f9fafb; font-weight: 600; color: #374151; }
+  h1 {
+    font-size: 30pt;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    color: var(--foreground);
+    margin: 0 0 6px 0;
+    line-height: 1.1;
+  }
+  h2 {
+    font-size: 17pt;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--foreground);
+    margin: 22px 0 10px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 12.5pt;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--foreground);
+    margin: 18px 0 7px 0;
+    page-break-after: avoid;
+  }
+  p { margin: 0 0 11px 0; }
+  ul, ol { margin: 8px 0 14px 0; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 9.5pt;
+    background: var(--card-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--brand);
+    border: 1px solid var(--border);
+    font-weight: 500;
+  }
+  pre {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5pt;
+    line-height: 1.55;
+    color: var(--foreground);
+    overflow-x: auto;
+    page-break-inside: avoid;
+  }
+  pre code { background: transparent; border: none; padding: 0; }
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 10px 0 18px 0;
+    font-size: 10pt;
+    page-break-inside: avoid;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  th, td {
+    padding: 9px 13px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+  }
+  tr:last-child td { border-bottom: none; }
+  th {
+    background: var(--card-bg);
+    font-weight: 600;
+    color: var(--foreground);
+    font-size: 9.5pt;
+    letter-spacing: -0.005em;
+  }
   .cover {
     height: 9.5in;
     display: flex;
@@ -32,124 +124,247 @@
     align-items: center;
     text-align: center;
     page-break-after: always;
+    background: radial-gradient(ellipse at center top, rgba(37, 99, 235, 0.05) 0%, rgba(255,255,255,0) 50%);
   }
-  .cover img { width: 120px; height: 120px; margin-bottom: 28px; }
-  .cover .subtitle { font-size: 14pt; color: #6b7280; margin-top: 6px; }
-  .cover .by { font-size: 10pt; color: #9ca3af; margin-top: 24px; letter-spacing: 1px; text-transform: uppercase; }
-  .callout { background: #eff6ff; border-left: 4px solid #2563eb; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; font-size: 10.5pt; }
-  .callout strong { color: #1e40af; }
-  .warn { background: #fef3c7; border-left-color: #d97706; }
-  .warn strong { color: #92400e; }
-  .ok { background: #ecfdf5; border-left-color: #059669; }
-  .ok strong { color: #065f46; }
+  .cover img {
+    width: 140px;
+    height: 140px;
+    margin-bottom: 36px;
+    filter: drop-shadow(0 12px 32px rgba(53, 66, 119, 0.18));
+  }
+  .cover h1 {
+    font-size: 38pt;
+    letter-spacing: -0.045em;
+    color: var(--brand);
+    font-weight: 800;
+  }
+  .cover .subtitle {
+    font-size: 13pt;
+    color: var(--muted);
+    margin-top: 12px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .cover .by {
+    font-size: 9.5pt;
+    color: var(--muted);
+    margin-top: 36px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    border-left: 3px solid var(--accent);
+    padding: 14px 18px;
+    margin: 14px 0;
+    border-radius: 10px;
+    font-size: 10pt;
+    line-height: 1.55;
+  }
+  .callout strong { color: var(--accent); font-weight: 600; }
+  .callout.warn {
+    background: var(--warn-soft);
+    border: 1px solid rgba(217, 119, 6, 0.22);
+    border-left-color: var(--warn);
+  }
+  .callout.warn strong { color: #92400e; }
+  .callout.ok {
+    background: var(--success-soft);
+    border: 1px solid rgba(5, 150, 105, 0.22);
+    border-left-color: var(--success);
+  }
+  .callout.ok strong { color: #065f46; }
   .step {
     display: flex;
-    margin: 14px 0;
+    margin: 16px 0;
     page-break-inside: avoid;
   }
   .step-num {
-    flex: 0 0 32px;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: #4f5f9e;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--brand) 0%, var(--accent) 100%);
     color: white;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 700;
-    font-size: 14pt;
-    margin-right: 14px;
+    font-size: 13pt;
+    margin-right: 16px;
+    box-shadow: 0 4px 12px rgba(53, 66, 119, 0.18);
+    letter-spacing: -0.02em;
   }
-  .step-body { flex: 1; padding-top: 2px; }
-  .step-body p:first-child { font-weight: 600; margin-bottom: 4px; font-size: 11.5pt; }
+  .step-body { flex: 1; padding-top: 4px; }
+  .step-body p:first-child {
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 12pt;
+    color: var(--foreground);
+    letter-spacing: -0.015em;
+  }
+  .screenshot {
+    max-width: 100%;
+    width: 500px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin: 14px 0 4px 0;
+    box-shadow: 0 4px 20px rgba(17, 24, 39, 0.08);
+    display: block;
+    page-break-inside: avoid;
+  }
+  .screenshot-caption {
+    font-size: 9pt;
+    color: var(--muted);
+    margin: 4px 0 10px 0;
+    letter-spacing: -0.005em;
+  }
+  .scenario {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.04) 0%, rgba(53, 66, 119, 0.02) 100%);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 20px;
+    margin: 14px 0 20px 0;
+    page-break-inside: avoid;
+  }
+  .scenario-title {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 9pt;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
   .panel-mock {
-    background: linear-gradient(180deg, #fff 0%, #fcfcfd 100%);
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 14px;
     padding: 0;
-    margin: 10px 0 14px 0;
-    box-shadow: 0 4px 14px rgba(17, 24, 39, 0.06);
+    margin: 12px 0 16px 0;
+    box-shadow: 0 10px 32px rgba(17, 24, 39, 0.08);
     max-width: 340px;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     page-break-inside: avoid;
     overflow: hidden;
   }
   .panel-mock .panel-header {
     background: linear-gradient(135deg, #4CAF50 0%, #66bb6a 100%);
     color: white;
-    padding: 12px 16px;
+    padding: 14px 18px;
   }
-  .panel-mock .panel-header .title { font-weight: 600; font-size: 11pt; }
-  .panel-mock .panel-header .sub { font-size: 8.5pt; opacity: 0.9; }
-  .panel-mock .panel-body { padding: 12px 16px; }
-  .panel-mock .stat-grid { display: flex; gap: 8px; margin-bottom: 10px; }
-  .panel-mock .stat { flex: 1; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; }
-  .panel-mock .stat .lbl { font-size: 7pt; color: #6b7280; text-transform: uppercase; letter-spacing: 0.3px; }
-  .panel-mock .stat .val { font-size: 14pt; font-weight: 800; color: #1f2937; }
-  .panel-mock .field { margin-bottom: 8px; }
-  .panel-mock .field .lbl { font-size: 9pt; font-weight: 600; color: #374151; margin-bottom: 3px; display: block; }
-  .panel-mock .field .input { background: white; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-size: 9pt; color: #6b7280; }
-  .panel-mock .btn { background: #4CAF50; color: white; padding: 8px; border-radius: 6px; text-align: center; font-weight: 600; font-size: 10pt; margin-top: 8px; }
-  .panel-mock .btn.stop { background: #dc2626; }
-  .log-entry {
-    font-family: 'SF Mono', Menlo, monospace;
+  .panel-mock .panel-header .title {
+    font-weight: 600;
+    font-size: 11pt;
+    letter-spacing: -0.015em;
+  }
+  .panel-mock .panel-header .sub {
     font-size: 8.5pt;
-    padding: 5px 8px;
-    border-left: 3px solid #16a34a;
-    background: #f9fafb;
-    margin-bottom: 4px;
-    border-radius: 3px;
+    opacity: 0.9;
+    margin-top: 2px;
+  }
+  .panel-mock .panel-body { padding: 14px 16px; }
+  .panel-mock .stat-grid { display: flex; gap: 10px; margin-bottom: 12px; }
+  .panel-mock .stat {
+    flex: 1;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+  }
+  .panel-mock .stat .lbl {
+    font-size: 7pt;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+  }
+  .panel-mock .stat .val {
+    font-size: 16pt;
+    font-weight: 700;
+    color: var(--foreground);
+    letter-spacing: -0.025em;
+    margin-top: 2px;
+  }
+  .panel-mock .btn {
+    background: #4CAF50;
+    color: white;
+    padding: 10px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 10pt;
+    margin-top: 10px;
+  }
+  .panel-mock .btn.stop { background: var(--error); }
+  .log-entry {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5pt;
+    padding: 6px 10px;
+    border-left: 3px solid var(--success);
+    background: var(--success-soft);
+    margin-bottom: 5px;
+    border-radius: 6px;
     color: #065f46;
   }
-  .log-entry.err { border-left-color: #dc2626; background: #fef2f2; color: #7f1d1d; }
-  .log-entry.warn { border-left-color: #d97706; background: #fef3c7; color: #92400e; }
-  .log-entry .ts { color: #9ca3af; margin-right: 6px; }
-  .log-entry .tag { color: #6b7280; font-weight: 600; margin-right: 4px; }
-  .scenario {
-    background: #fafafa;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin: 12px 0;
-    page-break-inside: avoid;
-  }
-  .scenario-title { font-weight: 700; color: #4f5f9e; font-size: 10.5pt; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .scenario-title::before { content: "▶  "; }
+  .log-entry.err { border-left-color: var(--error); background: var(--error-soft); color: #7f1d1d; }
+  .log-entry.warn { border-left-color: var(--warn); background: var(--warn-soft); color: #92400e; }
+  .log-entry .ts { color: var(--muted); margin-right: 6px; }
+  .log-entry .tag { color: var(--muted); font-weight: 600; margin-right: 4px; }
   .chrome-prompt {
     border: 1px solid #dadce0;
-    border-radius: 8px;
-    padding: 14px 16px;
+    border-radius: 10px;
+    padding: 16px 18px;
     background: white;
     max-width: 360px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-    margin: 10px 0;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.12);
+    margin: 12px 0;
     font-size: 10pt;
     page-break-inside: avoid;
   }
-  .chrome-prompt .head { font-weight: 600; margin-bottom: 10px; font-size: 11pt; }
-  .chrome-prompt .bullets { margin: 8px 0; padding-left: 16px; color: #5f6368; }
-  .chrome-prompt .actions { margin-top: 14px; text-align: right; }
-  .chrome-prompt .actions .btn { display: inline-block; padding: 6px 14px; border-radius: 4px; font-weight: 500; font-size: 10pt; margin-left: 8px; }
-  .chrome-prompt .actions .allow { background: #1a73e8; color: white; }
-  .chrome-prompt .actions .block { background: transparent; color: #1a73e8; border: 1px solid transparent; }
-  .tree { font-family: 'SF Mono', Menlo, monospace; font-size: 9.5pt; line-height: 1.6; background: #fafafa; padding: 10px 14px; border-radius: 6px; border: 1px solid #e5e7eb; }
-  .footer { font-size: 9pt; color: #6b7280; text-align: center; margin-top: 22px; border-top: 1px solid #e5e7eb; padding-top: 10px; page-break-before: avoid; }
-  .screenshot {
-    max-width: 100%;
-    width: 500px;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
-    margin: 10px 0 4px 0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    display: block;
-    page-break-inside: avoid;
+  .chrome-prompt .head {
+    font-weight: 500;
+    margin-bottom: 10px;
+    font-size: 11pt;
+    color: #202124;
+    letter-spacing: -0.01em;
   }
-  .screenshot-caption {
+  .chrome-prompt .bullets {
+    margin: 8px 0;
+    padding-left: 16px;
+    color: #5f6368;
+  }
+  .chrome-prompt .actions { margin-top: 14px; text-align: right; }
+  .chrome-prompt .actions .btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-weight: 500;
+    font-size: 10pt;
+    margin-left: 8px;
+  }
+  .chrome-prompt .actions .allow { background: #1a73e8; color: white; }
+  .chrome-prompt .actions .block { background: transparent; color: #1a73e8; }
+  .tree {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5pt;
+    line-height: 1.75;
+    background: var(--card-bg);
+    padding: 14px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    page-break-inside: avoid;
+    color: var(--foreground);
+  }
+  .footer {
     font-size: 9pt;
-    color: #6b7280;
-    margin: 2px 0 8px 0;
-    font-style: italic;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 24px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    page-break-before: avoid;
+    letter-spacing: -0.005em;
   }
 </style>
 </head>
@@ -163,7 +378,7 @@
 </div>
 
 <h2>What this tool does</h2>
-<p>Jane Chart Assistant is a Chrome extension that exports patient chart PDFs from Jane App in bulk — instead of clicking through every patient and every chart by hand, it runs up to 8 browser tabs in parallel and saves everything into organized folders on your computer.</p>
+<p>Jane Chart Assistant is a Chrome extension that exports patient chart PDFs from Jane App in bulk. Instead of clicking through every patient and every chart by hand, it runs up to 8 browser tabs in parallel and saves everything into organized folders on your computer.</p>
 <p>Everything happens locally in your browser. The extension only talks to Jane App's own servers; nothing is sent anywhere else.</p>
 
 <div class="callout"><strong>Good for:</strong> clinic transitions, compliance archives, end-of-year backups, data migration projects.</div>
@@ -171,7 +386,7 @@
 
 <h2>What you need</h2>
 <ul>
-  <li><strong>Google Chrome</strong> (or any Chromium browser — Edge, Brave, Arc). Safari and Firefox are not supported.</li>
+  <li><strong>Google Chrome</strong> (or any Chromium browser like Edge, Brave, or Arc). Safari and Firefox are not supported.</li>
   <li><strong>A Jane App login</strong> with permission to view the charts you want to export.</li>
   <li><strong>The <code>jane-chart-assistant.zip</code> file</strong> you received (bundled with this guide).</li>
 </ul>
@@ -183,7 +398,7 @@
   <div class="step-num">1</div>
   <div class="step-body">
     <p>Unzip the file you received.</p>
-    <p>Save the unzipped folder somewhere you won't move or delete it — for example, <code>Documents/jane-chart-assistant</code>. If you ever delete that folder, the extension will stop working.</p>
+    <p>Save the unzipped folder somewhere you won't move or delete it. For example, <code>Documents/jane-chart-assistant</code>. If you ever delete that folder, the extension will stop working.</p>
   </div>
 </div>
 
@@ -200,7 +415,7 @@
   <div class="step-num">3</div>
   <div class="step-body">
     <p>Turn on Developer mode.</p>
-    <p>Find the <strong>Developer mode</strong> switch in the top-right corner of the extensions page and flip it on. Three new buttons — <strong>Load unpacked</strong>, <strong>Pack extension</strong>, <strong>Update</strong> — will appear at the top-left.</p>
+    <p>Find the <strong>Developer mode</strong> switch in the top-right corner of the extensions page and flip it on. Three new buttons (<strong>Load unpacked</strong>, <strong>Pack extension</strong>, and <strong>Update</strong>) will appear at the top-left.</p>
     <img class="screenshot" src="screenshots/01-enable-developer-mode.png" alt="chrome://extensions with Developer mode toggle on and Load unpacked button visible" />
     <p class="screenshot-caption">Developer mode toggle (top right) flipped on; Load unpacked appears at top left.</p>
   </div>
@@ -210,7 +425,7 @@
   <div class="step-num">4</div>
   <div class="step-body">
     <p>Click "Load unpacked" and pick the unzipped folder.</p>
-    <p>In the file picker, navigate to the folder you unzipped in step 1 — the folder itself, not a file inside it. It's the one that contains <code>manifest.json</code>.</p>
+    <p>In the file picker, navigate to the folder you unzipped in step 1. Pick the folder itself, not a file inside it. It's the one that contains <code>manifest.json</code>.</p>
     <img class="screenshot" src="screenshots/02-load-unpacked.png" alt="macOS file picker showing the unzipped jane-extension folder contents" />
     <p class="screenshot-caption">The folder to select contains <code>manifest.json</code>, the <code>src/</code> subfolder, and the icon PNGs.</p>
     <p>After you click Select, the extension installs. A new tile labeled <strong>Jane Chart Assistant</strong> appears on the extensions page:</p>
@@ -229,9 +444,9 @@
   </div>
 </div>
 
-<div class="callout warn"><strong>About the yellow banner.</strong> Chrome will show "Disable developer mode extensions" every time it starts. Click <strong>×</strong> to dismiss — do not click Disable, or the extension will stop working until you re-enable it.</div>
+<div class="callout warn"><strong>About the yellow banner.</strong> Chrome will show "Disable developer mode extensions" every time it starts. Click <strong>×</strong> to dismiss. Do not click Disable, or the extension will stop working until you re-enable it.</div>
 
-<h2>Your first export — walkthrough</h2>
+<h2>Your first export: walkthrough</h2>
 
 <div class="scenario">
   <div class="scenario-title">Example scenario</div>
@@ -242,9 +457,9 @@
   <div class="step-num">1</div>
   <div class="step-body">
     <p>Click the Brightlight logo in your Chrome toolbar.</p>
-    <p>A side panel opens on the right side of the window showing the entry form and two mode buttons — <strong>Export Charts</strong> (for bulk chart PDF export) and <strong>Migration</strong> (for appointments + patients export).</p>
+    <p>A side panel opens on the right side of the window showing the entry form and two mode buttons: <strong>Export Charts</strong> (for bulk chart PDF export) and <strong>Migration</strong> (for appointments + patients export).</p>
     <img class="screenshot" src="screenshots/05-side-panel-open.png" alt="Jane Chart Assistant side panel open showing the empty form, Export Charts button, and Migration button" />
-    <p class="screenshot-caption">The side panel at startup — stats at top, the three shared form fields (clinic, email, password), and the two mode buttons.</p>
+    <p class="screenshot-caption">The side panel at startup. Stats at top, the three shared form fields (clinic, email, password), and the two mode buttons.</p>
   </div>
 </div>
 
@@ -262,7 +477,7 @@
     <p>Fill in the form.</p>
     <table>
       <tr><th>Field</th><th>What Alex enters</th><th>Notes</th></tr>
-      <tr><td>Clinic Name</td><td><code>exampleclinic</code></td><td>The subdomain from the Jane URL — everything before <code>.janeapp.com</code>.</td></tr>
+      <tr><td>Clinic Name</td><td><code>exampleclinic</code></td><td>The subdomain from the Jane URL. Everything before <code>.janeapp.com</code>.</td></tr>
       <tr><td>Email</td><td><code>alex@example.com</code></td><td>The email used to sign in to Jane App.</td></tr>
       <tr><td>Password</td><td>(Alex's password)</td><td>Stored locally only while the run is active.</td></tr>
       <tr><td>Number of Threads</td><td><code>4</code></td><td>4 is a safe default. 1 is the slowest and safest. 8 is fastest but more likely to hit rate limits.</td></tr>
@@ -275,7 +490,7 @@
   <div class="step-num">4</div>
   <div class="step-body">
     <p>Click <strong>Start</strong>.</p>
-    <p>Chrome will show a permission dialog — this is expected and only happens the first time you export from a given clinic:</p>
+    <p>Chrome will show a permission dialog. This is expected and only happens the first time you export from a given clinic:</p>
     <div class="chrome-prompt">
       <div class="head">Allow "Jane Chart Assistant" to:</div>
       <div class="bullets">• Read and change your data on exampleclinic.janeapp.com</div>
@@ -284,7 +499,7 @@
         <span class="btn allow">Allow</span>
       </div>
     </div>
-    <p>Click <strong>Allow</strong>. This grants access to <em>only</em> Alex's clinic subdomain — not to any other Jane clinic, and not to any other website. Chrome remembers the grant, so the dialog won't appear again for this clinic.</p>
+    <p>Click <strong>Allow</strong>. This grants access to <em>only</em> Alex's clinic subdomain. Not to any other Jane clinic, and not to any other website. Chrome remembers the grant, so the dialog won't appear again for this clinic.</p>
   </div>
 </div>
 
@@ -310,7 +525,7 @@
       </div>
     </div>
     <p>It's normal to see a few warnings. The tabs must stay open, but you can minimize Chrome or switch to other windows.</p>
-    <div class="callout"><strong>About "slow down" or "rate limit" messages.</strong> Jane App will occasionally tell the extension to slow down — you may see log entries like <code>Rate limit detected. Pausing 60 seconds...</code> or similar "you're going too fast" warnings. This is expected. The extension automatically pauses, waits out the limit, then resumes from where it left off. No action is needed from you, and nothing is lost.</div>
+    <div class="callout"><strong>About "slow down" or "rate limit" messages.</strong> Jane App will occasionally tell the extension to slow down. You may see log entries like <code>Rate limit detected. Pausing 60 seconds...</code> or similar "you're going too fast" warnings. This is expected. The extension automatically pauses, waits out the limit, then resumes from where it left off. No action is needed from you, and nothing is lost.</div>
   </div>
 </div>
 
@@ -344,14 +559,14 @@
   <li><strong>Close any Jane App tabs</strong> the extension opened.</li>
   <li><strong>Click the Brightlight icon</strong> in your toolbar, re-enter your clinic name, email, password, and thread count, and click <strong>Start</strong>.</li>
 </ol>
-<p>When it starts, the extension scans <code>~/Downloads/jane-scraper/</code> and skips any chart it already has on disk — so the new run picks up wherever the old one stopped.</p>
+<p>When it starts, the extension scans <code>~/Downloads/jane-scraper/</code> and skips any chart it already has on disk, so the new run picks up wherever the old one stopped.</p>
 
 <h2>Troubleshooting</h2>
 <table>
   <tr><th>Symptom</th><th>What to do</th></tr>
   <tr><td>"Disable developer mode extensions" banner</td><td>Click × to dismiss. Don't click Disable.</td></tr>
   <tr><td>Side panel doesn't open</td><td>Go to <code>chrome://extensions</code>, toggle the extension off and back on.</td></tr>
-  <tr><td>Permission dialog didn't appear</td><td>Check the clinic name field — no <code>https://</code>, no <code>.janeapp.com</code>, just the subdomain (e.g. <code>exampleclinic</code>).</td></tr>
+  <tr><td>Permission dialog didn't appear</td><td>Check the clinic name field: no <code>https://</code>, no <code>.janeapp.com</code>, just the subdomain (e.g. <code>exampleclinic</code>).</td></tr>
   <tr><td>"Login failed" in the log</td><td>Try logging in manually at <code>https://&lt;clinic&gt;.janeapp.com</code> first to confirm the credentials work.</td></tr>
   <tr><td>Frequent "rate limit detected" messages</td><td>Normal in moderation. If constant, reduce thread count to 2 or 1 and restart.</td></tr>
   <tr><td>Laptop goes to sleep mid-run</td><td>macOS: System Settings → Lock Screen → set display-off and screen-saver to Never. Windows: Settings → Power → Screen and sleep → Never.</td></tr>
