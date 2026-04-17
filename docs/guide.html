@@ -135,6 +135,22 @@
   .chrome-prompt .actions .block { background: transparent; color: #1a73e8; border: 1px solid transparent; }
   .tree { font-family: 'SF Mono', Menlo, monospace; font-size: 9.5pt; line-height: 1.6; background: #fafafa; padding: 10px 14px; border-radius: 6px; border: 1px solid #e5e7eb; }
   .footer { font-size: 9pt; color: #6b7280; text-align: center; margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 14px; }
+  .screenshot {
+    max-width: 100%;
+    width: 500px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    margin: 10px 0 4px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    display: block;
+    page-break-inside: avoid;
+  }
+  .screenshot-caption {
+    font-size: 9pt;
+    color: #6b7280;
+    margin: 2px 0 8px 0;
+    font-style: italic;
+  }
 </style>
 </head>
 <body>
@@ -184,15 +200,22 @@
   <div class="step-num">3</div>
   <div class="step-body">
     <p>Turn on Developer mode.</p>
-    <p>Find the <strong>Developer mode</strong> switch in the top-right corner of the extensions page and flip it on. New buttons will appear at the top-left.</p>
+    <p>Find the <strong>Developer mode</strong> switch in the top-right corner of the extensions page and flip it on. Three new buttons — <strong>Load unpacked</strong>, <strong>Pack extension</strong>, <strong>Update</strong> — will appear at the top-left.</p>
+    <img class="screenshot" src="screenshots/01-enable-developer-mode.png" alt="chrome://extensions with Developer mode toggle on and Load unpacked button visible" />
+    <p class="screenshot-caption">Developer mode toggle (top right) flipped on; Load unpacked appears at top left.</p>
   </div>
 </div>
 
 <div class="step">
   <div class="step-num">4</div>
   <div class="step-body">
-    <p>Click "Load unpacked" (top-left button).</p>
-    <p>In the file picker, select the unzipped folder from step 1 — the folder itself, not a file inside it. The one that contains <code>manifest.json</code>.</p>
+    <p>Click "Load unpacked" and pick the unzipped folder.</p>
+    <p>In the file picker, navigate to the folder you unzipped in step 1 — the folder itself, not a file inside it. It's the one that contains <code>manifest.json</code>.</p>
+    <img class="screenshot" src="screenshots/02-load-unpacked.png" alt="macOS file picker showing the unzipped jane-extension folder contents" />
+    <p class="screenshot-caption">The folder to select contains <code>manifest.json</code>, the <code>src/</code> subfolder, and the icon PNGs.</p>
+    <p>After you click Select, the extension installs. A new tile labeled <strong>Jane Chart Assistant</strong> appears on the extensions page:</p>
+    <img class="screenshot" src="screenshots/03-installed.png" alt="Jane Chart Assistant tile installed on chrome://extensions" />
+    <p class="screenshot-caption">Confirm the tile is present and its toggle is on (blue).</p>
   </div>
 </div>
 
@@ -200,7 +223,9 @@
   <div class="step-num">5</div>
   <div class="step-body">
     <p>Pin the extension to the toolbar.</p>
-    <p>Click the puzzle-piece icon in Chrome's toolbar, find "Jane Chart Assistant", and click the pin icon next to it. The Brightlight logo now sits in your toolbar for one-click access.</p>
+    <p>Click the puzzle-piece icon in Chrome's toolbar. In the menu that opens, find "Jane Chart Assistant" and click the pin icon next to it. The Brightlight logo now sits in your toolbar for one-click access.</p>
+    <img class="screenshot" src="screenshots/04-pin-to-toolbar.png" alt="Chrome extensions puzzle-piece menu showing Jane Chart Assistant with a pin icon" />
+    <p class="screenshot-caption">Click the pin icon next to Jane Chart Assistant to add it to your toolbar.</p>
   </div>
 </div>
 
@@ -217,20 +242,9 @@
   <div class="step-num">1</div>
   <div class="step-body">
     <p>Click the Brightlight logo in your Chrome toolbar.</p>
-    <p>A side panel opens on the right side of the window. It looks like this:</p>
-    <div class="panel-mock">
-      <div class="panel-header">
-        <div class="title">Jane Chart Assistant</div>
-        <div class="sub">Bulk chart export and organization tool</div>
-      </div>
-      <div class="panel-body">
-        <div class="stat-grid">
-          <div class="stat"><div class="lbl">PDFs Downloaded</div><div class="val">0</div></div>
-          <div class="stat"><div class="lbl">Users Finished</div><div class="val">0</div></div>
-        </div>
-        <div class="btn">▶ Export Charts</div>
-      </div>
-    </div>
+    <p>A side panel opens on the right side of the window showing the entry form and two mode buttons — <strong>Export Charts</strong> (for bulk chart PDF export) and <strong>Migration</strong> (for appointments + patients export).</p>
+    <img class="screenshot" src="screenshots/05-side-panel-open.png" alt="Jane Chart Assistant side panel open showing the empty form, Export Charts button, and Migration button" />
+    <p class="screenshot-caption">The side panel at startup — stats at top, the three shared form fields (clinic, email, password), and the two mode buttons.</p>
   </div>
 </div>
 
