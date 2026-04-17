@@ -34,9 +34,6 @@ export const TIMEOUTS = {
 
   // Login delays
   LOGIN_FORM_WAIT: 500,              // 0.5s - Wait for login page to load
-  LOGIN_INPUT_DELAY: 100,            // 0.1s - Delay before starting to type
-  TYPING_CHAR_MIN_DELAY: 30,         // 30ms - Minimum delay between typing characters (human-like)
-  TYPING_CHAR_MAX_DELAY: 60,         // 60ms - Maximum delay between typing characters (human-like)
   POST_EMAIL_DELAY: 200,             // 0.2s - Delay after entering email
   POST_PASSWORD_DELAY: 300,          // 0.3s - Delay after entering password before clicking
 
