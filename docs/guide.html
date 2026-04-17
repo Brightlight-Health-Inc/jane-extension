@@ -309,7 +309,8 @@
         <div class="btn stop">■ Stop Export</div>
       </div>
     </div>
-    <p>It's normal to see a few warnings — the extension handles rate limits and transient failures automatically. The tabs must stay open, but you can minimize Chrome or switch to other windows.</p>
+    <p>It's normal to see a few warnings. The tabs must stay open, but you can minimize Chrome or switch to other windows.</p>
+    <div class="callout"><strong>About "slow down" or "rate limit" messages.</strong> Jane App will occasionally tell the extension to slow down — you may see log entries like <code>Rate limit detected. Pausing 60 seconds...</code> or similar "you're going too fast" warnings. This is expected. The extension automatically pauses, waits out the limit, then resumes from where it left off. No action is needed from you, and nothing is lost.</div>
   </div>
 </div>
 
@@ -331,10 +332,19 @@
   </div>
 </div>
 
-<div class="callout ok"><strong>Tip: resume mid-run.</strong> If you interrupt an export and restart it, the extension detects already-downloaded files by filename and skips them — so you can safely stop/start without re-downloading everything.</div>
+<h2>Stopping and resuming</h2>
 
-<h2>Stopping an export</h2>
+<h3>Stopping on purpose</h3>
 <p>Click the red <strong>Stop Export</strong> button in the side panel. The extension finishes the chart it's currently on, closes the worker tabs, and stops adding to Downloads. Any files already saved stay put.</p>
+
+<h3>Resuming after a crash or interruption</h3>
+<p>If your computer crashes, Chrome quits, the export seems frozen, or you close the browser mid-run, you can safely pick back up where you left off. Nothing that's already saved will be re-downloaded, and nothing gets double-counted.</p>
+<ol>
+  <li><strong>Click Stop Export</strong> in the side panel if the button is still visible. (If the panel is closed or the button is gone, skip this step.)</li>
+  <li><strong>Close any Jane App tabs</strong> the extension opened.</li>
+  <li><strong>Click the Brightlight icon</strong> in your toolbar, re-enter your clinic name, email, password, and thread count, and click <strong>Start</strong>.</li>
+</ol>
+<p>When it starts, the extension scans <code>~/Downloads/jane-scraper/</code> and skips any chart it already has on disk — so the new run picks up wherever the old one stopped.</p>
 
 <h2>Troubleshooting</h2>
 <table>
