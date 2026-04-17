@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jane Chart Assistant — Quick Start Guide</title>
+<style>
+  @page { size: Letter; margin: 0.75in; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+    color: #1f2937;
+    margin: 0;
+  }
+  h1 { font-size: 26pt; font-weight: 700; color: #1f2937; margin: 0 0 4px 0; letter-spacing: -0.5px; }
+  h2 { font-size: 16pt; font-weight: 700; color: #1f2937; margin: 24px 0 8px 0; border-bottom: 2px solid #e5e7eb; padding-bottom: 4px; page-break-after: avoid; }
+  h3 { font-size: 13pt; font-weight: 700; color: #374151; margin: 18px 0 6px 0; page-break-after: avoid; }
+  p { margin: 0 0 10px 0; }
+  ul, ol { margin: 6px 0 12px 0; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 10pt; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; color: #111827; }
+  pre { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 9.5pt; line-height: 1.4; color: #111827; overflow-x: auto; page-break-inside: avoid; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 14px 0; font-size: 10pt; page-break-inside: avoid; }
+  th, td { border: 1px solid #e5e7eb; padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #f9fafb; font-weight: 600; color: #374151; }
+  .cover {
+    height: 9.5in;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    page-break-after: always;
+  }
+  .cover img { width: 120px; height: 120px; margin-bottom: 28px; }
+  .cover .subtitle { font-size: 14pt; color: #6b7280; margin-top: 6px; }
+  .cover .by { font-size: 10pt; color: #9ca3af; margin-top: 24px; letter-spacing: 1px; text-transform: uppercase; }
+  .callout { background: #eff6ff; border-left: 4px solid #2563eb; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; font-size: 10.5pt; }
+  .callout strong { color: #1e40af; }
+  .warn { background: #fef3c7; border-left-color: #d97706; }
+  .warn strong { color: #92400e; }
+  .ok { background: #ecfdf5; border-left-color: #059669; }
+  .ok strong { color: #065f46; }
+  .step {
+    display: flex;
+    margin: 14px 0;
+    page-break-inside: avoid;
+  }
+  .step-num {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #4f5f9e;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14pt;
+    margin-right: 14px;
+  }
+  .step-body { flex: 1; padding-top: 2px; }
+  .step-body p:first-child { font-weight: 600; margin-bottom: 4px; font-size: 11.5pt; }
+  .panel-mock {
+    background: linear-gradient(180deg, #fff 0%, #fcfcfd 100%);
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0;
+    margin: 10px 0 14px 0;
+    box-shadow: 0 4px 14px rgba(17, 24, 39, 0.06);
+    max-width: 340px;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    page-break-inside: avoid;
+    overflow: hidden;
+  }
+  .panel-mock .panel-header {
+    background: linear-gradient(135deg, #4CAF50 0%, #66bb6a 100%);
+    color: white;
+    padding: 12px 16px;
+  }
+  .panel-mock .panel-header .title { font-weight: 600; font-size: 11pt; }
+  .panel-mock .panel-header .sub { font-size: 8.5pt; opacity: 0.9; }
+  .panel-mock .panel-body { padding: 12px 16px; }
+  .panel-mock .stat-grid { display: flex; gap: 8px; margin-bottom: 10px; }
+  .panel-mock .stat { flex: 1; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; }
+  .panel-mock .stat .lbl { font-size: 7pt; color: #6b7280; text-transform: uppercase; letter-spacing: 0.3px; }
+  .panel-mock .stat .val { font-size: 14pt; font-weight: 800; color: #1f2937; }
+  .panel-mock .field { margin-bottom: 8px; }
+  .panel-mock .field .lbl { font-size: 9pt; font-weight: 600; color: #374151; margin-bottom: 3px; display: block; }
+  .panel-mock .field .input { background: white; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-size: 9pt; color: #6b7280; }
+  .panel-mock .btn { background: #4CAF50; color: white; padding: 8px; border-radius: 6px; text-align: center; font-weight: 600; font-size: 10pt; margin-top: 8px; }
+  .panel-mock .btn.stop { background: #dc2626; }
+  .log-entry {
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 8.5pt;
+    padding: 5px 8px;
+    border-left: 3px solid #16a34a;
+    background: #f9fafb;
+    margin-bottom: 4px;
+    border-radius: 3px;
+    color: #065f46;
+  }
+  .log-entry.err { border-left-color: #dc2626; background: #fef2f2; color: #7f1d1d; }
+  .log-entry.warn { border-left-color: #d97706; background: #fef3c7; color: #92400e; }
+  .log-entry .ts { color: #9ca3af; margin-right: 6px; }
+  .log-entry .tag { color: #6b7280; font-weight: 600; margin-right: 4px; }
+  .scenario {
+    background: #fafafa;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    page-break-inside: avoid;
+  }
+  .scenario-title { font-weight: 700; color: #4f5f9e; font-size: 10.5pt; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .scenario-title::before { content: "▶  "; }
+  .chrome-prompt {
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: white;
+    max-width: 360px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+    margin: 10px 0;
+    font-size: 10pt;
+    page-break-inside: avoid;
+  }
+  .chrome-prompt .head { font-weight: 600; margin-bottom: 10px; font-size: 11pt; }
+  .chrome-prompt .bullets { margin: 8px 0; padding-left: 16px; color: #5f6368; }
+  .chrome-prompt .actions { margin-top: 14px; text-align: right; }
+  .chrome-prompt .actions .btn { display: inline-block; padding: 6px 14px; border-radius: 4px; font-weight: 500; font-size: 10pt; margin-left: 8px; }
+  .chrome-prompt .actions .allow { background: #1a73e8; color: white; }
+  .chrome-prompt .actions .block { background: transparent; color: #1a73e8; border: 1px solid transparent; }
+  .tree { font-family: 'SF Mono', Menlo, monospace; font-size: 9.5pt; line-height: 1.6; background: #fafafa; padding: 10px 14px; border-radius: 6px; border: 1px solid #e5e7eb; }
+  .footer { font-size: 9pt; color: #6b7280; text-align: center; margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 14px; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <img src="data:image/png;base64,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" alt="Brightlight" />
+  <h1>Jane Chart Assistant</h1>
+  <div class="subtitle">Quick Start Guide for Bulk Chart Export</div>
+  <div class="by">By Brightlight Health</div>
+</div>
+
+<h2>What this tool does</h2>
+<p>Jane Chart Assistant is a Chrome extension that exports patient chart PDFs from Jane App in bulk — instead of clicking through every patient and every chart by hand, it runs up to 8 browser tabs in parallel and saves everything into organized folders on your computer.</p>
+<p>Everything happens locally in your browser. The extension only talks to Jane App's own servers; nothing is sent anywhere else.</p>
+
+<div class="callout"><strong>Good for:</strong> clinic transitions, compliance archives, end-of-year backups, data migration projects.</div>
+<div class="callout warn"><strong>Before you start:</strong> the browser tabs must stay open for the duration of the run. Large clinics (10,000+ patients) should budget an overnight window. Disable sleep/lock on your computer so it doesn't pause mid-run.</div>
+
+<h2>What you need</h2>
+<ul>
+  <li><strong>Google Chrome</strong> (or any Chromium browser — Edge, Brave, Arc). Safari and Firefox are not supported.</li>
+  <li><strong>A Jane App login</strong> with permission to view the charts you want to export.</li>
+  <li><strong>The <code>jane-chart-assistant.zip</code> file</strong> you received (bundled with this guide).</li>
+</ul>
+
+<h2>Install the extension</h2>
+<p>One-time setup, about two minutes.</p>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <p>Unzip the file you received.</p>
+    <p>Save the unzipped folder somewhere you won't move or delete it — for example, <code>Documents/jane-chart-assistant</code>. If you ever delete that folder, the extension will stop working.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <p>Open Chrome's extensions page.</p>
+    <p>Type this into the Chrome address bar and press Enter:</p>
+    <pre>chrome://extensions</pre>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <p>Turn on Developer mode.</p>
+    <p>Find the <strong>Developer mode</strong> switch in the top-right corner of the extensions page and flip it on. New buttons will appear at the top-left.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <p>Click "Load unpacked" (top-left button).</p>
+    <p>In the file picker, select the unzipped folder from step 1 — the folder itself, not a file inside it. The one that contains <code>manifest.json</code>.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">5</div>
+  <div class="step-body">
+    <p>Pin the extension to the toolbar.</p>
+    <p>Click the puzzle-piece icon in Chrome's toolbar, find "Jane Chart Assistant", and click the pin icon next to it. The Brightlight logo now sits in your toolbar for one-click access.</p>
+  </div>
+</div>
+
+<div class="callout warn"><strong>About the yellow banner.</strong> Chrome will show "Disable developer mode extensions" every time it starts. Click <strong>×</strong> to dismiss — do not click Disable, or the extension will stop working until you re-enable it.</div>
+
+<h2>Your first export — walkthrough</h2>
+
+<div class="scenario">
+  <div class="scenario-title">Example scenario</div>
+  <p>Dr. Alex runs <strong>Example Clinic</strong>, whose Jane URL is <code>https://exampleclinic.janeapp.com</code>. They want to archive every patient chart from their clinic onto their laptop. Alex signs in to Jane App as <code>alex@example.com</code>.</p>
+</div>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <p>Click the Brightlight logo in your Chrome toolbar.</p>
+    <p>A side panel opens on the right side of the window. It looks like this:</p>
+    <div class="panel-mock">
+      <div class="panel-header">
+        <div class="title">Jane Chart Assistant</div>
+        <div class="sub">Bulk chart export and organization tool</div>
+      </div>
+      <div class="panel-body">
+        <div class="stat-grid">
+          <div class="stat"><div class="lbl">PDFs Downloaded</div><div class="val">0</div></div>
+          <div class="stat"><div class="lbl">Users Finished</div><div class="val">0</div></div>
+        </div>
+        <div class="btn">▶ Export Charts</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <p>Click "Export Charts".</p>
+    <p>A form appears with fields for clinic name, email, password, number of threads, and an optional Max Patient ID.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <p>Fill in the form.</p>
+    <table>
+      <tr><th>Field</th><th>What Alex enters</th><th>Notes</th></tr>
+      <tr><td>Clinic Name</td><td><code>exampleclinic</code></td><td>The subdomain from the Jane URL — everything before <code>.janeapp.com</code>.</td></tr>
+      <tr><td>Email</td><td><code>alex@example.com</code></td><td>The email used to sign in to Jane App.</td></tr>
+      <tr><td>Password</td><td>(Alex's password)</td><td>Stored locally only while the run is active.</td></tr>
+      <tr><td>Number of Threads</td><td><code>4</code></td><td>4 is a safe default. 1 is the slowest and safest. 8 is fastest but more likely to hit rate limits.</td></tr>
+      <tr><td>Max Patient ID</td><td>(blank)</td><td>Leave blank to process every patient. Fill in to stop after a specific ID.</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <p>Click <strong>Start</strong>.</p>
+    <p>Chrome will show a permission dialog — this is expected and only happens the first time you export from a given clinic:</p>
+    <div class="chrome-prompt">
+      <div class="head">Allow "Jane Chart Assistant" to:</div>
+      <div class="bullets">• Read and change your data on exampleclinic.janeapp.com</div>
+      <div class="actions">
+        <span class="btn block">Block</span>
+        <span class="btn allow">Allow</span>
+      </div>
+    </div>
+    <p>Click <strong>Allow</strong>. This grants access to <em>only</em> Alex's clinic subdomain — not to any other Jane clinic, and not to any other website. Chrome remembers the grant, so the dialog won't appear again for this clinic.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">5</div>
+  <div class="step-body">
+    <p>Watch the export run.</p>
+    <p>The extension opens one browser tab per thread (4 tabs in this example), logs in to each, and starts walking through patient records. The side panel switches to a running view:</p>
+    <div class="panel-mock">
+      <div class="panel-header">
+        <div class="title">Jane Chart Assistant</div>
+        <div class="sub">Exporting...</div>
+      </div>
+      <div class="panel-body">
+        <div class="stat-grid">
+          <div class="stat"><div class="lbl">PDFs Downloaded</div><div class="val">347</div></div>
+          <div class="stat"><div class="lbl">Users Finished</div><div class="val">58</div></div>
+        </div>
+        <div class="log-entry"><span class="ts">09:12:04</span><span class="tag">[T1]</span> Processing patient 127...</div>
+        <div class="log-entry warn"><span class="ts">09:12:18</span><span class="tag">[T3]</span> Rate limit detected. Pausing 60s...</div>
+        <div class="log-entry"><span class="ts">09:13:22</span><span class="tag">[T3]</span> Resumed after rate limit</div>
+        <div class="btn stop">■ Stop Export</div>
+      </div>
+    </div>
+    <p>It's normal to see a few warnings — the extension handles rate limits and transient failures automatically. The tabs must stay open, but you can minimize Chrome or switch to other windows.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">6</div>
+  <div class="step-body">
+    <p>When it finishes, find the files in your Downloads folder.</p>
+    <p>Every chart lands in <code>~/Downloads/jane-scraper/</code>, organized one folder per patient:</p>
+    <div class="tree">~/Downloads/<br>
+&nbsp;&nbsp;└── jane-scraper/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── 127_Sarah_Johnson/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── Consultation_Note__4521.pdf<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── Followup__4810.pdf<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└── Lab_Results__5012.pdf<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── 128_Michael_Chen/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── Initial_Assessment__4602.pdf<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└── Treatment_Plan__4785.pdf<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── ...</div>
+  </div>
+</div>
+
+<div class="callout ok"><strong>Tip: resume mid-run.</strong> If you interrupt an export and restart it, the extension detects already-downloaded files by filename and skips them — so you can safely stop/start without re-downloading everything.</div>
+
+<h2>Stopping an export</h2>
+<p>Click the red <strong>Stop Export</strong> button in the side panel. The extension finishes the chart it's currently on, closes the worker tabs, and stops adding to Downloads. Any files already saved stay put.</p>
+
+<h2>Troubleshooting</h2>
+<table>
+  <tr><th>Symptom</th><th>What to do</th></tr>
+  <tr><td>"Disable developer mode extensions" banner</td><td>Click × to dismiss. Don't click Disable.</td></tr>
+  <tr><td>Side panel doesn't open</td><td>Go to <code>chrome://extensions</code>, toggle the extension off and back on.</td></tr>
+  <tr><td>Permission dialog didn't appear</td><td>Check the clinic name field — no <code>https://</code>, no <code>.janeapp.com</code>, just the subdomain (e.g. <code>exampleclinic</code>).</td></tr>
+  <tr><td>"Login failed" in the log</td><td>Try logging in manually at <code>https://&lt;clinic&gt;.janeapp.com</code> first to confirm the credentials work.</td></tr>
+  <tr><td>Frequent "rate limit detected" messages</td><td>Normal in moderation. If constant, reduce thread count to 2 or 1 and restart.</td></tr>
+  <tr><td>Laptop goes to sleep mid-run</td><td>macOS: System Settings → Lock Screen → set display-off and screen-saver to Never. Windows: Settings → Power → Screen and sleep → Never.</td></tr>
+  <tr><td>All tabs go idle</td><td>Click Stop Export, wait 10s, then click Export Charts again. Already-saved files will be skipped on the resume.</td></tr>
+  <tr><td>Need to remove the extension</td><td><code>chrome://extensions</code> → Jane Chart Assistant → Remove.</td></tr>
+</table>
+
+<h2>Privacy</h2>
+<ul>
+  <li>The extension does <strong>not</strong> send patient data, credentials, or usage data anywhere other than directly between your browser and Jane App's own servers.</li>
+  <li>All exported PDFs are stored only on your local computer.</li>
+  <li>Credentials are held in Chrome's local storage only while an export is running and are never transmitted elsewhere.</li>
+  <li>The full privacy policy is included in the extension folder (<code>PRIVACY_POLICY.md</code>).</li>
+</ul>
+
+<div class="footer">Jane Chart Assistant · Brightlight Health · For questions, reply to the email this guide was attached to.</div>
+
+</body>
+</html>
