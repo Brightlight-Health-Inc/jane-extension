@@ -54,10 +54,20 @@ export class PdfDownloader {
     try {
       const storageKey = this.getThreadKey ? this.getThreadKey('lastPdfFetchTs') : 'lastPdfFetchTs';
 
-      const wrap = await chrome.storage.local.get(storageKey);
-      const lastTs = Number(wrap[storageKey] || 0);
-      const now = Date.now();
-      const delta = now - lastTs;
+      // Global rate-limit gate: if any thread recently hit Jane's rate limit,
+      // every thread waits until the pause window expires. Prevents cascades.
+      const gate = await chrome.storage.local.get(['rateLimitUntil', storageKey]);
+      const rateLimitUntil = Number(gate.rateLimitUntil || 0);
+      const gateWait = rateLimitUntil - Date.now();
+      if (gateWait > 0) {
+        if (this.logger) {
+          this.logger.info(`Global rate-limit gate: waiting ${Math.ceil(gateWait / 1000)}s`);
+        }
+        await sleep(gateWait, { shouldStop });
+      }
+
+      const lastTs = Number(gate[storageKey] || 0);
+      const delta = Date.now() - lastTs;
 
       if (delta < this.minFetchGap) {
         const waitTime = this.minFetchGap - delta;

@@ -133,6 +133,23 @@ function startThreadWatchdog() {
       if ((last > 0 && idleMs > 120000) || frozen) {
         const clinic = getClinicNameFromUrl();
         if (clinic) {
+          // Classify page state before reloading. A blind reload on a rate-limit
+          // page just bounces right back into the same limit; on a login page it
+          // loops indefinitely. Distinguish the three cases.
+          const bodyText = (document.body?.innerText || '').slice(0, 2000);
+          const isRateLimited = PATTERNS.RATE_LIMIT_TEXT.test(bodyText);
+
+          if (isRateLimited) {
+            logger.warn('Watchdog: rate-limit page detected, setting global gate instead of reload');
+            try {
+              const existing = await chrome.storage.local.get('rateLimitUntil');
+              const until = Math.max(Number(existing.rateLimitUntil || 0), Date.now() + 60000);
+              await chrome.storage.local.set({ rateLimitUntil: until, frozen: false });
+            } catch (_) {}
+            scheduleCheck();
+            return;
+          }
+
           shouldStop = false;
           try { await chrome.storage.local.set({ frozen: false }); } catch (_) {}
           window.location.reload();
@@ -294,8 +311,14 @@ async function detectAndHandleRateLimit() {
       return false; // Not a rate limit page, we're good
     }
 
-    // We hit the rate limit! Pause only this thread, then resume
+    // We hit the rate limit! Pause this thread AND set a global gate so sibling
+    // threads back off before they march into the same limiter.
     sendStatus('⚠️ Rate limit detected. Pausing this thread for 60 seconds...', 'warning');
+    try {
+      const existing = await chrome.storage.local.get('rateLimitUntil');
+      const until = Math.max(Number(existing.rateLimitUntil || 0), Date.now() + 60000);
+      await chrome.storage.local.set({ rateLimitUntil: until });
+    } catch (_) {}
     shouldStop = true;
     cancelAllTimeouts();
 
@@ -392,9 +415,14 @@ async function scheduleRecovery(clinicName, resumeState) {
 async function pauseAllThreadsAndRetry(clinicName, resumeState, pauseMs = 70_000) {
   try {
     if (!clinicName) clinicName = getClinicNameFromUrl();
-    if (!clinicName || shouldStop) return;
+    if (!clinicName) return;
 
-    // Local pause ONLY for this thread (do not broadcast)
+    // Check for explicit user-requested stop (not the thread-local shouldStop,
+    // which callers often set before invoking this function as an interrupt signal).
+    const userStop = await chrome.storage.local.get('userRequestedStop');
+    if (userStop && userStop.userRequestedStop) return;
+
+    // Local pause for this thread; global gate set by caller / watchdog.
     shouldStop = true;
     cancelAllTimeouts();
 
