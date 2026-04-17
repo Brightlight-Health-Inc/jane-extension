@@ -6,7 +6,13 @@
  * - Track patient locks to prevent duplicate work
  * - Handle work completion
  * - Skip patients (not found, no charts)
+ * - Retry-once queue for transient failures (timeout etc.)
  */
+
+// Reasons that indicate a patient check "gave up" but the patient may still
+// exist. These go into a retry queue drained after the primary pass.
+// Everything else (not_found, no_charts) is treated as a permanent skip.
+const TRANSIENT_REASONS = new Set(['timeout', 'error', 'unknown']);
 
 let schedulerMutationQueue = Promise.resolve();
 
@@ -86,13 +92,43 @@ export async function assignWork(threadId, originTabId) {
       // Find the next patient that:
       // 1. Hasn't been completed already
       // 2. Isn't locked by another thread
-      const assignedId = findNextAvailablePatient(
+      let assignedId = findNextAvailablePatient(
         nextPatientId,
         maxId,
         completedPatients,
         patientLocks,
         threadId
       );
+      let fromRetryQueue = false;
+
+      // Primary pool exhausted — drain the retry queue for patients that
+      // failed with transient errors on the first pass. Each patient gets
+      // exactly one retry; anything marked in retriedPatients is skipped.
+      if (assignedId == null) {
+        const failedQueue = Array.isArray(workRegistry.failedPatients)
+          ? workRegistry.failedPatients
+          : [];
+        const retried = workRegistry.retriedPatients || {};
+
+        while (failedQueue.length > 0) {
+          const candidate = failedQueue.shift();
+          if (retried[candidate]) continue;
+          if (completedPatients[candidate]) continue;
+          if (patientLocks[candidate]) continue;
+
+          assignedId = candidate;
+          retried[candidate] = true;
+          fromRetryQueue = true;
+          workRegistry.failedPatients = failedQueue;
+          workRegistry.retriedPatients = retried;
+          break;
+        }
+
+        // Persist the drained queue even if nothing assignable was found.
+        if (!fromRetryQueue) {
+          workRegistry.failedPatients = failedQueue;
+        }
+      }
 
       // No more patients to assign
       if (assignedId == null) {
@@ -106,8 +142,11 @@ export async function assignWork(threadId, originTabId) {
         status: 'locked'
       };
 
-      // Advance the pointer for next request
-      workRegistry.nextPatientId = assignedId + 1;
+      // Advance the pointer only on primary-pool assignments; retry-queue
+      // patients are below the pointer already.
+      if (!fromRetryQueue) {
+        workRegistry.nextPatientId = assignedId + 1;
+      }
 
       // Update thread status and ensure we track the tabId for this thread
       activeThreads[threadId] = activeThreads[threadId] || {};
@@ -124,7 +163,8 @@ export async function assignWork(threadId, originTabId) {
       return {
         status: 'assigned',
         patientId: assignedId,
-        clinicName: workRegistry.clinicName
+        clinicName: workRegistry.clinicName,
+        retry: fromRetryQueue
       };
     } catch (error) {
       console.error('assignWork error:', error);
@@ -137,19 +177,29 @@ export async function assignWork(threadId, originTabId) {
 }
 
 /**
- * Mark patient as not found or having no charts
- * Unlocks the patient so other threads don't try it
+ * Mark patient as skipped. Unlocks the patient so other threads don't re-lock.
+ *
+ * If the skip reason is transient (e.g. timeout), the patient is added to the
+ * retry queue unless it has already been retried once. Terminal reasons
+ * (not_found, no_charts) just release the lock and leave the patient
+ * permanently un-completed.
  *
  * @param {string} threadId - Thread ID
  * @param {number} patientId - Patient ID
- * @returns {Promise<Object>} Result {ok: boolean, error?: string}
+ * @param {string|null} reason - Why we gave up (from the content script)
+ * @returns {Promise<Object>} Result {ok: boolean, queuedForRetry?: boolean, error?: string}
  */
-export async function skipPatient(threadId, patientId) {
+export async function skipPatient(threadId, patientId, reason = null) {
   return runSchedulerMutation(async () => {
     try {
-      const data = await chrome.storage.local.get(['patientLocks', 'activeThreads']);
+      const data = await chrome.storage.local.get([
+        'patientLocks',
+        'activeThreads',
+        'workRegistry'
+      ]);
       const patientLocks = data.patientLocks || {};
       const activeThreads = data.activeThreads || {};
+      const workRegistry = data.workRegistry || {};
 
       // Unlock the patient
       if (patientLocks[patientId] && patientLocks[patientId].threadId === threadId) {
@@ -162,9 +212,25 @@ export async function skipPatient(threadId, patientId) {
         activeThreads[threadId].patientId = null;
       }
 
-      await chrome.storage.local.set({ patientLocks, activeThreads });
+      // Route transient failures into the retry queue (once).
+      let queuedForRetry = false;
+      if (TRANSIENT_REASONS.has(reason)) {
+        const retried = workRegistry.retriedPatients || {};
+        const failed = Array.isArray(workRegistry.failedPatients)
+          ? workRegistry.failedPatients
+          : [];
+        const alreadyQueued = failed.includes(patientId);
+        if (!retried[patientId] && !alreadyQueued) {
+          failed.push(patientId);
+          workRegistry.failedPatients = failed;
+          workRegistry.retriedPatients = retried;
+          queuedForRetry = true;
+        }
+      }
 
-      return { ok: true };
+      await chrome.storage.local.set({ patientLocks, activeThreads, workRegistry });
+
+      return { ok: true, queuedForRetry };
     } catch (error) {
       return {
         ok: false,
@@ -248,7 +314,7 @@ export function handleWorkMessage(request, sender, sendResponse) {
 
     case 'patientNotFound':
     case 'patientNoCharts':
-      skipPatient(request.threadId, request.patientId)
+      skipPatient(request.threadId, request.patientId, request.reason)
         .then((result) => sendResponse(result));
       return true;
 

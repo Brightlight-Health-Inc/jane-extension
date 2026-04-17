@@ -276,7 +276,9 @@ export async function startThreads(options = {}) {
         startingIndex,
         nextPatientId: startingIndex,
         maxId: (Number.isInteger(maxId) && maxId > 0) ? maxId : null,
-        globalStop: false
+        globalStop: false,
+        failedPatients: [],
+        retriedPatients: {}
       },
       activeThreads,
       patientLocks,

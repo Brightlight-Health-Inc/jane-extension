@@ -2025,7 +2025,7 @@ async function processOnePatient(clinicName, patientId) {
     sendStatus(`⚠️ ${human} after ${counts.patientCheck} retr${counts.patientCheck === 1 ? 'y' : 'ies'} - skipping`, 'warning');
     try {
       await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ action: 'patientNotFound', threadId, patientId }, resolve);
+        chrome.runtime.sendMessage({ action: 'patientNotFound', threadId, patientId, reason }, resolve);
       });
     } catch (error) {
       logger.error('Operation failed', error);
@@ -2065,7 +2065,7 @@ async function processOnePatient(clinicName, patientId) {
     sendStatus(`ℹ️ ${human} after ${counts.charts} retr${counts.charts === 1 ? 'y' : 'ies'} - skipping`);
     try {
       await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ action: 'patientNoCharts', threadId, patientId }, resolve);
+        chrome.runtime.sendMessage({ action: 'patientNoCharts', threadId, patientId, reason }, resolve);
       });
     } catch (error) {
       logger.error('Operation failed', error);
