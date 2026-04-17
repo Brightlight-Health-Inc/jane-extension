@@ -9,9 +9,29 @@
  * - Handle download errors
  */
 
-import { THROTTLE, TIMEOUTS } from '../../shared/constants.js';
+import { THROTTLE, TIMEOUTS, RETRY } from '../../shared/constants.js';
 import { sleep } from '../../shared/utils/async-utils.js';
 import { cleanFilename } from '../../shared/utils/string-utils.js';
+
+// Substrings that identify a transient PDF-download failure. These can come
+// from our own thrown errors (fetchPdf, waitForDownloadComplete) or from the
+// Chrome downloads API surfacing a server error. Anything not matched here is
+// treated as permanent and short-circuits the retry loop.
+const RETRIABLE_PDF_ERROR_PATTERNS = [
+  'server_failed',
+  'download interrupted',
+  'returned html instead of a pdf',
+  'pdf is empty',
+  'timed out',
+  'failed to fetch',
+  'network',
+  'pdf fetch failed'
+];
+
+function isRetriablePdfError(error) {
+  const msg = (error?.message || '').toLowerCase();
+  return RETRIABLE_PDF_ERROR_PATTERNS.some((p) => msg.includes(p));
+}
 
 /**
  * Custom error for PDF download failures
@@ -427,6 +447,8 @@ export class PdfDownloader {
         }
         downloadComplete = true;
       } else if (downloadState.state === 'interrupted') {
+        // Clean up the partial/error file so Downloads doesn't accumulate junk.
+        try { await this.deleteDownload(downloadId); } catch (_) {}
         throw new PdfDownloadError(`Download interrupted${downloadState.error ? `: ${downloadState.error}` : ''}`);
       }
 
@@ -505,66 +527,90 @@ export class PdfDownloader {
    * @returns {Promise<Object>} Result {success: boolean, downloadId?: number}
    */
   async downloadPdfWithCookies(pdfUrl, filename, patientName, patientId, options = {}) {
-    const { shouldStop = null } = options;
+    const { shouldStop = null, maxRetries = RETRY.PDF_DOWNLOAD_MAX_RETRIES } = options;
 
-    try {
-      // Clean patient name for folder
-      const cleanPatientName = cleanFilename(patientName, {
-        replacement: '_',
-        collapseRepeats: true
-      });
+    // Clean patient name for folder
+    const cleanPatientName = cleanFilename(patientName, {
+      replacement: '_',
+      collapseRepeats: true
+    });
+    const patientFolder = `jane-scraper/${patientId}_${cleanPatientName}`;
 
-      const patientFolder = `jane-scraper/${patientId}_${cleanPatientName}`;
+    let lastError = null;
+
+    // Retry loop. Each attempt re-runs the full fetch+blob-or-native path so a
+    // transient fetch error, a SERVER_FAILED interrupt, or an HTML-instead-of-PDF
+    // response all get another shot. The inner download helpers already clean
+    // up partial files via deleteDownload() before throwing.
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      if (shouldStop && shouldStop()) {
+        throw new Error('Stopped while downloading PDF');
+      }
 
       let downloadId = null;
+      let blob = null;
 
       try {
-        // Fetch the PDF
-        const blob = await this.fetchPdf(pdfUrl, shouldStop);
+        try {
+          // Primary path: authenticated fetch, then save the blob.
+          blob = await this.fetchPdf(pdfUrl, shouldStop);
+          downloadId = await this.downloadBlob(blob, filename, patientFolder, shouldStop);
+        } catch (innerError) {
+          if (innerError.message === 'Stopped' || innerError.message.includes('Stopped while')) {
+            throw innerError;
+          }
+          if (!this.shouldUseNativeFallback(innerError)) {
+            throw innerError;
+          }
 
-        // Store blob in memory for tracking
-        this.currentPatientFiles.push({ filename, blob });
+          // Fallback: let Chrome pull the file directly using the browser session.
+          const directUrl = this.stripPreviewSuffix(this.normalizePdfUrlInput(pdfUrl));
+          downloadId = await this.downloadRemotePdf(directUrl, filename, patientFolder, shouldStop);
+        }
 
-        // Download blob to disk
-        downloadId = await this.downloadBlob(blob, filename, patientFolder, shouldStop);
+        // Success — track and return.
+        if (blob) this.currentPatientFiles.push({ filename, blob });
+        this.currentPatientDownloadIds.push(downloadId);
+        return { success: true, downloadId, attempts: attempt };
+
       } catch (error) {
         if (error.message === 'Stopped' || error.message.includes('Stopped while')) {
+          if (this.logger) this.logger.warn('PDF download stopped by user');
           throw error;
         }
 
-        if (!this.shouldUseNativeFallback(error)) {
-          throw error;
+        lastError = error;
+
+        if (attempt >= maxRetries || !isRetriablePdfError(error)) {
+          break;
         }
 
-        const directUrl = this.stripPreviewSuffix(this.normalizePdfUrlInput(pdfUrl));
-        downloadId = await this.downloadRemotePdf(directUrl, filename, patientFolder, shouldStop);
-      }
+        const backoffMs = Math.min(
+          RETRY.MAX_DELAY_MS,
+          RETRY.BASE_DELAY_MS * Math.pow(2, attempt - 1)
+        ) + Math.floor(Math.random() * 500);
 
-      // Track this download
-      this.currentPatientDownloadIds.push(downloadId);
-
-      return {
-        success: true,
-        downloadId
-      };
-
-    } catch (error) {
-      if (error.message === 'Stopped' || error.message.includes('Stopped while')) {
         if (this.logger) {
-          this.logger.warn('PDF download stopped by user');
+          this.logger.warn(
+            `PDF download attempt ${attempt}/${maxRetries} failed (${error.message}). Retrying in ${Math.round(backoffMs / 1000)}s`
+          );
         }
-        throw error; // Re-throw stop errors
+        await sleep(backoffMs, { shouldStop });
       }
-
-      if (this.logger) {
-        this.logger.error('PDF download failed', error);
-      }
-
-      return {
-        success: false,
-        error: error.message
-      };
     }
+
+    if (this.logger) {
+      this.logger.error(
+        `PDF download failed after ${maxRetries} attempt${maxRetries === 1 ? '' : 's'}`,
+        lastError
+      );
+    }
+
+    return {
+      success: false,
+      error: lastError?.message || 'Unknown error',
+      attempts: maxRetries
+    };
   }
 
   /**
