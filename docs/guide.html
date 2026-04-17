@@ -134,7 +134,7 @@
   .chrome-prompt .actions .allow { background: #1a73e8; color: white; }
   .chrome-prompt .actions .block { background: transparent; color: #1a73e8; border: 1px solid transparent; }
   .tree { font-family: 'SF Mono', Menlo, monospace; font-size: 9.5pt; line-height: 1.6; background: #fafafa; padding: 10px 14px; border-radius: 6px; border: 1px solid #e5e7eb; }
-  .footer { font-size: 9pt; color: #6b7280; text-align: center; margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 14px; }
+  .footer { font-size: 9pt; color: #6b7280; text-align: center; margin-top: 22px; border-top: 1px solid #e5e7eb; padding-top: 10px; page-break-before: avoid; }
   .screenshot {
     max-width: 100%;
     width: 500px;
@@ -296,7 +296,7 @@
     <div class="panel-mock">
       <div class="panel-header">
         <div class="title">Jane Chart Assistant</div>
-        <div class="sub">Exporting...</div>
+        <div class="sub">Bulk chart export and organization tool</div>
       </div>
       <div class="panel-body">
         <div class="stat-grid">
@@ -349,15 +349,16 @@
   <tr><td>Need to remove the extension</td><td><code>chrome://extensions</code> → Jane Chart Assistant → Remove.</td></tr>
 </table>
 
-<h2>Privacy</h2>
-<ul>
-  <li>The extension does <strong>not</strong> send patient data, credentials, or usage data anywhere other than directly between your browser and Jane App's own servers.</li>
-  <li>All exported PDFs are stored only on your local computer.</li>
-  <li>Credentials are held in Chrome's local storage only while an export is running and are never transmitted elsewhere.</li>
-  <li>The full privacy policy is included in the extension folder (<code>PRIVACY_POLICY.md</code>).</li>
-</ul>
-
-<div class="footer">Jane Chart Assistant · Brightlight Health · For questions, reply to the email this guide was attached to.</div>
+<div style="page-break-inside: avoid;">
+  <h2>Privacy</h2>
+  <ul>
+    <li>The extension does <strong>not</strong> send patient data, credentials, or usage data anywhere other than directly between your browser and Jane App's own servers.</li>
+    <li>All exported PDFs are stored only on your local computer.</li>
+    <li>Credentials are held in Chrome's local storage only while an export is running and are never transmitted elsewhere.</li>
+    <li>The full privacy policy is included in the extension folder (<code>PRIVACY_POLICY.md</code>).</li>
+  </ul>
+  <div class="footer">Jane Chart Assistant · Brightlight Health · For questions, reply to the email this guide was attached to.</div>
+</div>
 
 </body>
 </html>
