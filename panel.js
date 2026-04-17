@@ -301,8 +301,13 @@ stopBtn.addEventListener('click', async () => {
  */
 chrome.runtime.onMessage.addListener((request) => {
   if (request.action === 'statusUpdate') {
-    const message = request.status.message || '';
-    
+    const rawMessage = request.status.message || '';
+    const threadId = request.status.threadId;
+    // Prefix with the thread tag (e.g. "[T3]") so multi-thread logs are
+    // traceable. Messages from single-tab flows (appointments/migration) have
+    // no threadId and render unchanged.
+    const message = threadId ? `[${threadId}] ${rawMessage}` : rawMessage;
+
     // Display the message (errors only)
     updateStatus(message, request.status.type);
 
