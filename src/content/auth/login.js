@@ -2,7 +2,7 @@
  * LOGIN MODULE
  *
  * Handles authentication with Jane App:
- * - Fill login form fields (compatible with framework-bound inputs)
+ * - Human-like typing to avoid bot detection
  * - Session validation
  * - Login state detection
  */
@@ -57,21 +57,18 @@ export async function isLoginSuccessful() {
 }
 
 /**
- * Fill an input field with a value.
+ * Type text into an input field with human-like delays
+ * Adds random delays between characters to avoid bot detection
  *
- * Sets the element's value directly and dispatches the `input` and `change`
- * events that framework-bound inputs (Ember, React, Angular) listen for, so
- * the framework's internal state picks up the change.
- *
- * @param {HTMLInputElement} input - Input element to fill
- * @param {string} text - Text to enter
+ * @param {HTMLInputElement} input - Input element to type into
+ * @param {string} text - Text to type
  * @param {Object} options - Configuration
- * @param {Function} options.shouldStop - Function that returns true to abort
+ * @param {Function} options.shouldStop - Function that returns true to stop typing
  * @param {Function} options.logger - Optional logger instance
  * @returns {Promise<void>}
- * @throws {Error} If shouldStop returns true or the input is invalid
+ * @throws {Error} If shouldStop returns true
  */
-export async function fillField(input, text, options = {}) {
+export async function typeHumanLike(input, text, options = {}) {
   const {
     shouldStop = null,
     logger = null
@@ -85,22 +82,37 @@ export async function fillField(input, text, options = {}) {
     throw new Error('Text must be a non-empty string');
   }
 
-  if (shouldStop && shouldStop()) {
-    throw new Error('Stopped while filling field');
-  }
-
   try {
+    // Focus on input
     input.focus();
-    input.value = text;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(TIMEOUTS.LOGIN_INPUT_DELAY, { shouldStop });
+
+    // Type each character with random human-like delay
+    for (const character of text) {
+      // Check if we should stop
+      if (shouldStop && shouldStop()) {
+        throw new Error('Stopped while typing');
+      }
+
+      // Add character to input
+      input.value += character;
+
+      // Trigger input event (required for React/Angular apps)
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+
+      // Random delay between characters (30-60ms)
+      const delay = TIMEOUTS.TYPING_CHAR_MIN_DELAY +
+                    Math.random() * (TIMEOUTS.TYPING_CHAR_MAX_DELAY - TIMEOUTS.TYPING_CHAR_MIN_DELAY);
+
+      await sleep(delay, { shouldStop });
+    }
 
     if (logger) {
-      logger.debug(`Filled ${text.length} characters`);
+      logger.debug(`Typed ${text.length} characters`);
     }
   } catch (error) {
     if (logger) {
-      logger.error('Field fill failed', error);
+      logger.error('Human-like typing failed', error);
     }
     throw error;
   }
@@ -202,7 +214,7 @@ export async function login(email, password, options = {}) {
       logger.info('Typing email');
     }
 
-    await fillField(emailInput, email, { shouldStop, logger });
+    await typeHumanLike(emailInput, email, { shouldStop, logger });
 
     if (logger) {
       logger.success('Email entered');
@@ -224,7 +236,7 @@ export async function login(email, password, options = {}) {
       logger.info('Typing password');
     }
 
-    await fillField(passwordInput, password, { shouldStop, logger });
+    await typeHumanLike(passwordInput, password, { shouldStop, logger });
 
     if (logger) {
       logger.success('Password entered');
