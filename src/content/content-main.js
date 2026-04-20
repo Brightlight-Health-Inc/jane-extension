@@ -2426,6 +2426,15 @@ chrome.storage.local.get(getBootstrapStorageKeys(), async (result) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Staff-first phase messages route through the dispatcher first.
   if (phaseDispatcher && ['initPreflight', 'beginDiscovery', 'beginDownload', 'beginProfile'].includes(request.action)) {
+    // The phase orchestrator names the thread (T1 = primary, T2..TN = download
+    // workers). Adopt that threadId before dispatching so getStorageKey and
+    // every downstream log is properly scoped.
+    if (request.threadId && threadId !== request.threadId) {
+      threadId = request.threadId;
+      logger.setThreadId(threadId);
+      if (!watchdogStarted) startThreadWatchdog();
+      logger?.info?.(`[content] adopted threadId=${threadId} from ${request.action}`);
+    }
     return phaseDispatcher.handleMessage(request, sender, sendResponse);
   }
 

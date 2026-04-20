@@ -108,6 +108,17 @@ async function stashCredentials(threadId, credentials) {
   await chrome.storage.local.set({ [`${threadId}_credentials`]: credentials });
 }
 
+async function registerThreadTab(threadId, tabId) {
+  const data = await chrome.storage.local.get('activeThreads');
+  const map = data.activeThreads || {};
+  map[threadId] = { tabId, status: 'active' };
+  await chrome.storage.local.set({ activeThreads: map });
+}
+
+async function clearActiveThreads() {
+  await chrome.storage.local.set({ activeThreads: {} });
+}
+
 export async function startStaffExport(payload) {
   return serialize(async () => {
     const {
@@ -136,6 +147,7 @@ export async function startStaffExport(payload) {
 
     await resetQueueForNewRun();
     await clearProfiles();
+    await clearActiveThreads();
 
     const primaryTabId = await openPrimaryTab(clinicName);
     await setState({
@@ -145,6 +157,7 @@ export async function startStaffExport(payload) {
       staffNames,
     });
     await stashCredentials('T1', { clinicName, email, password });
+    await registerThreadTab('T1', primaryTabId);
 
     notifyPhase(PHASES.PREFLIGHT);
     notifyPanel('Primary tab opened, logging in for pre-flight resolution', 'info');
@@ -206,6 +219,7 @@ async function spawnDownloadWorkers() {
     const tab = await chrome.tabs.create({ url: `https://${clinicName}.janeapp.com/admin` });
     workerTabIds.push(tab.id);
     await stashCredentials(threadId, credentials);
+    await registerThreadTab(threadId, tab.id);
     const delayMs = (i - 1) * THREADING.THREAD_STAGGER_DELAY_MS;
     setTimeout(() => {
       sendMessageWithRetry(tab.id, {
@@ -289,6 +303,7 @@ export async function stopExport() {
     })));
     setTimeout(() => closeTabs(ids), 800);
     await setState({ phase: PHASES.STOPPED, primaryTabId: null, workerTabIds: [] });
+    await clearActiveThreads();
     notifyPhase(PHASES.STOPPED);
     notifyPanel('Export stopped by user.', 'warn');
     return { ok: true };

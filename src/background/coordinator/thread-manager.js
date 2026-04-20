@@ -38,12 +38,29 @@ export async function sendMessageWithRetry(tabId, message, maxAttempts = 30, del
 export function handleThreadMessage(request, sender, sendResponse) {
   switch (request.action) {
     case 'getThreadAssignment':
-      // Legacy helper: worker tabs that originated under the old patient-ID
-      // flow called this to learn their assignment. Under the staff-first
-      // model the phase orchestrator passes threadId directly in each
-      // beginDownload / beginProfile message, so we answer "unknown" here
-      // and let content-main fall back to storage state.
-      sendResponse({ ok: false });
+      // Look the tab up in the orchestrator-maintained activeThreads map so
+      // content-main can recover its threadId after a page reload (e.g. the
+      // login form submit that repaints the admin page). The orchestrator
+      // populates this map when it spawns each primary/worker tab.
+      (async () => {
+        try {
+          const tabId = sender?.tab?.id;
+          if (typeof tabId !== 'number') {
+            sendResponse({ ok: false });
+            return;
+          }
+          const data = await chrome.storage.local.get('activeThreads');
+          const map = data.activeThreads || {};
+          const entry = Object.entries(map).find(([, v]) => v?.tabId === tabId);
+          if (entry) {
+            sendResponse({ ok: true, threadId: entry[0] });
+          } else {
+            sendResponse({ ok: false });
+          }
+        } catch (error) {
+          sendResponse({ ok: false, error: error.message });
+        }
+      })();
       return true;
 
     default:
