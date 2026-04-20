@@ -56,6 +56,9 @@ export function createPhaseDispatcher({ getContext }) {
       ctx.logger?.info?.(`[phase] PRE-FLIGHT result: ${ok} ok, ${amb} ambiguous, ${miss} not-found (of ${directorySize} staff in directory)`);
 
       chrome.runtime.sendMessage({ action: 'preflightResults', rows });
+      // Clear the persisted state so a later page reload (e.g. user navigating
+      // before clicking Start) doesn't re-run preflight in an infinite loop.
+      await clearState();
     } catch (error) {
       ctx.logger?.error?.(`[phase] PRE-FLIGHT failed: ${error.message}`);
       throw error;
