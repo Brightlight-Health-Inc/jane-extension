@@ -48,7 +48,8 @@
         "src/content/scraping/*.js",
         "src/content/scraping/extractors/*.js",
         "src/content/download/*.js",
-        "src/content/recovery/*.js"
+        "src/content/recovery/*.js",
+        "src/content/discovery/*.js"
       ],
       "matches": ["https://*.janeapp.com/*"]
     }
