@@ -196,8 +196,15 @@ els.startBtn.addEventListener('click', () => {
 });
 
 els.stopBtn.addEventListener('click', () => {
+  // Optimistic UI: snap back to the form immediately so the user isn't
+  // hunting for feedback while the background tears down worker tabs.
+  reviewRows = [];
+  els.reviewRows.replaceChildren();
+  setUiState('form');
+  setPhase('stopped');
   chrome.runtime.sendMessage({ action: 'stopExport' }, (response) => {
     if (response?.ok) logStatus('Stop signal sent', 'warn');
+    else logStatus(`Stop failed: ${response?.error || 'unknown'}`, 'error');
   });
 });
 
@@ -301,6 +308,7 @@ chrome.runtime.onMessage.addListener((request) => {
     return;
   }
   if (request.action === 'phaseUpdate') {
+    logStatus(`[panel] phase update → ${request.phase}`, 'info');
     setPhase(request.phase, request);
     if (request.phase === 'done' || request.phase === 'stopped') {
       reviewRows = [];
