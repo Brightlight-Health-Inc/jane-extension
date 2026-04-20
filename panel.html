@@ -2,327 +2,246 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Jane App Scraper</title>
+  <title>Jane Chart Assistant</title>
   <style>
     :root {
       --bg: #f5f7fb;
       --card: #ffffff;
       --muted: #6b7280;
       --text: #1f2937;
-      --brand: #4CAF50;
-      --brand-600: #45a049;
+      --brand: #354277;
+      --brand-600: #2b3563;
+      --accent: #2563eb;
       --info: #2563eb;
       --info-50: #eaf2ff;
       --success: #16a34a;
       --success-50: #e8f5e9;
+      --warn: #b45309;
+      --warn-50: #fef3c7;
       --error: #dc2626;
       --error-50: #ffebee;
       --border: #e5e7eb;
-      --shadow: rgba(17, 24, 39, 0.08);
+      --shadow: rgba(17, 24, 39, 0.06);
     }
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-      background: linear-gradient(180deg, #f7fafc 0%, var(--bg) 100%);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      background: var(--bg);
       height: 100vh;
       display: flex;
       flex-direction: column;
       color: var(--text);
     }
-
-    .header {
-      background: linear-gradient(135deg, var(--brand) 0%, #66bb6a 100%);
-      color: white;
-      padding: 20px;
-      box-shadow: 0 8px 24px var(--shadow);
-    }
-
-    .header h1 {
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 5px;
-    }
-
-    .header p {
-      font-size: 12px;
-      opacity: 0.9;
-    }
-
+    .header { background: var(--brand); color: white; padding: 16px 20px; }
+    .header h1 { font-size: 16px; font-weight: 600; }
+    .header p { font-size: 11px; opacity: 0.8; margin-top: 2px; }
     .content {
       flex: 1;
-      padding: 20px;
+      padding: 16px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      max-width: 900px;
-      margin: 0 auto;
+      gap: 12px;
       width: 100%;
     }
 
-    .form-section {
-      transition: all 0.3s ease;
+    .stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+    .stat { background: var(--card); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); }
+    .stat .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+    .stat .value { font-size: 16px; font-weight: 700; margin-top: 2px; color: var(--text); }
+
+    .phase-strip {
+      display: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
     }
+    .phase-strip.visible { display: block; }
+    .phase-strip .phase-label { font-weight: 600; color: var(--brand); }
+    .phase-strip .phase-detail { color: var(--muted); margin-top: 4px; }
 
-    .form-section.hidden {
-      max-height: 0;
-      opacity: 0;
-      overflow: hidden;
-      margin-bottom: 0;
-      padding: 0;
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group label { font-size: 12px; font-weight: 600; color: var(--text); }
+    .form-group input, .form-group textarea {
+      width: 100%; padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px; font-size: 13px;
+      font-family: inherit;
     }
-
-    .form-group { margin-bottom: 12px; }
-
-    .form-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 16px;
+    .form-group textarea { min-height: 120px; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+    .form-group input:focus, .form-group textarea:focus {
+      outline: none; border-color: var(--accent);
     }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-    @media (min-width: 720px) {
-      .form-grid { grid-template-columns: 1fr 1fr; }
-      .col-span-2 { grid-column: span 2; }
-    }
-
-    .form-group label {
-      display: block;
+    .btn {
+      padding: 10px 12px;
+      border: none;
+      border-radius: 6px;
       font-size: 13px;
       font-weight: 600;
-      color: #333;
-      margin-bottom: 6px;
-    }
-
-    .form-group input {
-      width: 100%;
-      padding: 10px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 14px;
-      transition: border-color 0.2s;
-    }
-
-    .form-group input:focus {
-      outline: none;
-      border-color: #4CAF50;
-    }
-
-    .btn-primary {
-      width: 100%;
-      padding: 12px 14px;
-      background: var(--brand);
-      color: white;
-      border: none;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
       cursor: pointer;
-      transition: transform .06s ease, background .2s ease, box-shadow .2s ease;
-      margin-bottom: 10px;
-      box-shadow: 0 6px 14px var(--shadow);
+      transition: background 0.15s;
     }
-
-    .btn-primary:hover { background: var(--brand-600); transform: translateY(-1px); }
-    .btn-primary:active { transform: translateY(0); }
-    .btn-primary:disabled { background: #c7d2fe; cursor: not-allowed; box-shadow: none; }
-
-    .btn-danger { background: var(--error); }
+    .btn-primary { background: var(--brand); color: white; }
+    .btn-primary:hover { background: var(--brand-600); }
+    .btn-primary:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: #f9fafb; }
+    .btn-danger { background: var(--error); color: white; }
     .btn-danger:hover { background: #b91c1c; }
 
+    .btn-row { display: flex; gap: 8px; }
+    .btn-row .btn { flex: 1; }
+
+    /* Review table */
+    .review-wrap { display: none; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .review-wrap.visible { display: block; }
+    .review-header { padding: 10px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+    .review-header strong { color: var(--text); }
+    .review-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .review-row:last-child { border-bottom: none; }
+    .review-row .badge {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+    }
+    .badge-ok { background: var(--success-50); color: var(--success); }
+    .badge-warn { background: var(--warn-50); color: var(--warn); }
+    .badge-err { background: var(--error-50); color: var(--error); }
+    .review-name { display: flex; flex-direction: column; }
+    .review-name .input-name { font-weight: 600; }
+    .review-name .matched-name { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .review-row select {
+      font-size: 12px;
+      padding: 4px 6px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: white;
+      max-width: 180px;
+    }
+    .review-row .row-action {
+      font-size: 11px; color: var(--error); background: none; border: none; cursor: pointer; padding: 4px 8px;
+    }
+    .review-row .row-action:hover { text-decoration: underline; }
+
+    /* Status log */
     .status-container {
-      margin-top: 8px;
-      padding: 0;
       background: var(--card);
-      border-radius: 12px;
-      box-shadow: 0 10px 24px var(--shadow);
-      min-height: 120px;
-      transition: all 0.3s ease;
+      border-radius: 8px;
+      border: 1px solid var(--border);
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      border: 1px solid var(--border);
+      min-height: 140px;
     }
-
-    .status-container.expanded {
-      flex: 1;
-      margin-top: 0;
+    .status-container.expanded { flex: 1; }
+    .status-header { padding: 10px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .status-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+    .status-count { font-size: 11px; color: var(--muted); background: white; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); }
+    .status-messages {
+      flex: 1; overflow-y: auto; padding: 10px;
+      display: flex; flex-direction: column; gap: 6px;
     }
-
-    .status-header {
-      padding: 12px 15px;
-      background: #fbfbfb;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .status-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
-
-    .status-count { font-size: 11px; color: var(--muted); background: #fff; padding: 3px 8px; border-radius: 12px; border: 1px solid var(--border); }
-
-    .status-messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; background: linear-gradient(180deg, #fff 0%, #fcfcfd 100%); }
-
-    .status-messages::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    .status-messages::-webkit-scrollbar-track {
-      background: #f1f1f1;
-      border-radius: 4px;
-    }
-
-    .status-messages::-webkit-scrollbar-thumb {
-      background: #888;
-      border-radius: 4px;
-    }
-
-    .status-messages::-webkit-scrollbar-thumb:hover {
-      background: #555;
-    }
-
     .status-message {
-      font-size: 13px;
-      color: var(--text);
-      line-height: 1.5;
-      padding: 10px 12px;
-      background: #f9fafb;
-      border-radius: 8px;
-      border-left: 3px solid var(--brand);
-      animation: slideIn 0.2s ease;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    }
-
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .status-message.error { border-left-color: var(--error); background: var(--error-50); color: #7f1d1d; }
-
-    .status-message.success { border-left-color: var(--success); background: var(--success-50); color: #1b5e20; }
-
-    .status-message.info { border-left-color: var(--info); background: var(--info-50); color: #1e3a8a; }
-
-    .status-message .timestamp {
-      font-size: 10px;
-      color: #999;
-      margin-right: 8px;
-    }
-
-    .divider {
-      height: 1px;
-      background: #e0e0e0;
-      margin: 20px 0;
-    }
-
-    .info-box {
-      padding: 12px 14px;
-      background: #ffffff;
-      border-radius: 12px;
       font-size: 12px;
-      color: var(--muted);
-      line-height: 1.5;
-      margin-bottom: 14px;
-      border: 1px solid var(--border);
-      box-shadow: 0 8px 18px var(--shadow);
+      line-height: 1.4;
+      padding: 8px 10px;
+      background: #f9fafb;
+      border-radius: 6px;
+      border-left: 3px solid var(--info);
+      font-family: ui-monospace, Menlo, monospace;
     }
+    .status-message.error { border-left-color: var(--error); background: var(--error-50); color: #7f1d1d; }
+    .status-message.success { border-left-color: var(--success); background: var(--success-50); color: #14532d; }
+    .status-message.warn { border-left-color: var(--warn); background: var(--warn-50); color: #7c2d12; }
+    .status-message .timestamp { font-size: 10px; color: var(--muted); margin-right: 6px; }
 
-    .info-box strong {
-      display: block;
-      margin-bottom: 4px;
+    .hidden { display: none !important; }
+
+    .hint {
+      font-size: 11px; color: var(--muted); line-height: 1.4;
+      background: #fafbfc; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
     }
-    .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .stat { background: var(--card); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 6px 14px var(--shadow); }
-    .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
-    .stat .value { font-size: 18px; font-weight: 800; margin-top: 2px; color: var(--text); }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>Jane Chart Assistant</h1>
-    <p>Bulk chart export and organization tool</p>
+    <p>Staff-first chart export</p>
   </div>
 
   <div class="content">
-    <div id="stats-container" class="info-box" style="margin-bottom: 16px;">
-      <div class="stats-grid" style="margin-top: 0;">
-        <div class="stat">
-          <div class="label">PDFs Downloaded</div>
-          <div class="value" id="stats-pdfs">0</div>
-        </div>
-        <div class="stat">
-          <div class="label">Users Finished</div>
-          <div class="value" id="stats-users">0</div>
-        </div>
-      </div>
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat"><div class="label">Queued</div><div class="value" id="stat-queued">0</div></div>
+      <div class="stat"><div class="label">Downloaded</div><div class="value" id="stat-done">0</div></div>
+      <div class="stat"><div class="label">Failed</div><div class="value" id="stat-failed">0</div></div>
     </div>
 
-    <div id="form-section" class="form-section">
-      <div class="form-grid">
-        <div class="form-group col-span-2">
-          <label for="clinic-name">Clinic Name</label>
-          <input type="text" id="clinic-name" placeholder="e.g., yourClinicName" value="">
-        </div>
+    <div class="phase-strip" id="phase-strip">
+      <div class="phase-label" id="phase-label">Idle</div>
+      <div class="phase-detail" id="phase-detail"></div>
+    </div>
 
+    <div id="form-section">
+      <div class="form-group">
+        <label for="clinic-name">Clinic Name</label>
+        <input type="text" id="clinic-name" placeholder="e.g., bedfordskinclinic">
+      </div>
+      <div class="form-row" style="margin-top: 8px;">
         <div class="form-group">
           <label for="email">Email</label>
-          <input type="email" id="email" placeholder="your.email@example.com" value="">
+          <input type="email" id="email" placeholder="you@clinic.com">
         </div>
-
         <div class="form-group">
           <label for="password">Password</label>
-          <input type="password" id="password" placeholder="Your Jane App password" value="">
+          <input type="password" id="password" placeholder="password">
         </div>
-
-        <!-- Charts-specific fields -->
-        <div id="charts-fields" class="form-group col-span-2" style="display: none;">
-          <label for="thread-count">Number of Threads (1-8)</label>
-          <input type="number" id="thread-count" min="1" max="8" value="1">
-        </div>
-
-        <div id="charts-fields-2" class="form-group col-span-2" style="display: none;">
-          <label for="max-id">Max Patient ID (optional)</label>
-          <input type="number" id="max-id" min="1" placeholder="Leave empty for no limit" value="">
-        </div>
-
-        <!-- Appointments-specific fields -->
-        <div id="appointments-fields" class="form-group col-span-2" style="display: none;">
-          <label for="start-date">Start Date</label>
-          <input type="date" id="start-date" value="">
-        </div>
-
-        <div id="appointments-fields-2" class="form-group col-span-2" style="display: none;">
-          <label for="end-date">End Date</label>
-          <input type="date" id="end-date" value="">
-        </div>
+      </div>
+      <div class="form-group" style="margin-top: 8px;">
+        <label for="thread-count">Threads (1-8)</label>
+        <input type="number" id="thread-count" min="1" max="8" value="4">
+      </div>
+      <div class="form-group" style="margin-top: 8px;">
+        <label for="staff-names">Staff Names (one per line)</label>
+        <textarea id="staff-names" placeholder="Paste staff names here, one per line. Honorifics like Dr./Mrs. are fine.&#10;&#10;Farhat Shabbir&#10;Dr. Kimberly Mach&#10;Emma Smith"></textarea>
+      </div>
+      <button id="resolve-btn" class="btn btn-primary" style="margin-top: 10px; width: 100%;">Resolve Staff</button>
+      <div class="hint" style="margin-top: 8px;">
+        Resolving logs into Jane once in a background tab and searches each name. You'll review matches before any charts are downloaded.
       </div>
     </div>
 
-    <button id="charts-btn" class="btn-primary">▶ Export Charts</button>
-    <button id="appointments-btn" class="btn-primary" style="background:#0ea5e9;">📦 Migration (Appts + Patients)</button>
-    <button id="start-btn" class="btn-primary" style="display:none;">▶ Start</button>
-    <button id="stop-btn" class="btn-primary btn-danger" style="display:none;">■ Stop Export</button>
+    <div class="review-wrap" id="review-wrap">
+      <div class="review-header">
+        <span><strong id="review-resolved-count">0</strong> resolved / <span id="review-total-count">0</span> total</span>
+        <span id="review-summary"></span>
+      </div>
+      <div id="review-rows"></div>
+      <div style="padding: 10px 12px; border-top: 1px solid var(--border);" class="btn-row">
+        <button id="back-btn" class="btn btn-secondary">Back to edit</button>
+        <button id="start-btn" class="btn btn-primary" disabled>Start Export</button>
+      </div>
+    </div>
 
-    <div id="status-container" class="status-container">
+    <button id="stop-btn" class="btn btn-danger hidden">Stop Export</button>
+
+    <div class="status-container">
       <div class="status-header">
-        <div class="status-label">Errors</div>
-        <div class="status-count" id="status-count">0 errors</div>
+        <div class="status-label">Log</div>
+        <div class="status-count" id="status-count">0 messages</div>
       </div>
-      <div class="status-messages" id="status-messages">
-      </div>
+      <div class="status-messages" id="status-messages"></div>
     </div>
   </div>
 

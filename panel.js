@@ -1,427 +1,328 @@
 /**
- * SIDE PANEL SCRIPT
- * 
- * This manages the UI side panel that the user interacts with.
- * 
- * What it does:
- * - Shows a form to enter Jane App credentials
- * - Has start/stop buttons
- * - Displays real-time status messages from worker threads
- * - Shows stats (PDFs downloaded, users processed, time elapsed, etc.)
- * - Automatically switches to "stop" mode when scraping is running
- */
-
-// ============================================================================
-// UI ELEMENTS
-// ============================================================================
-
-// Get references to all the UI elements we need
-const chartsBtn = document.getElementById('charts-btn');
-const migrationBtn = document.getElementById('appointments-btn');
-const startBtn = document.getElementById('start-btn');
-const stopBtn = document.getElementById('stop-btn');
-const statusMessages = document.getElementById('status-messages');
-const statusCount = document.getElementById('status-count');
-const formSection = document.getElementById('form-section');
-const statusContainer = document.getElementById('status-container');
-
-// Form field groups
-const chartsFields = document.getElementById('charts-fields');
-const chartsFields2 = document.getElementById('charts-fields-2');
-const appointmentsFields = document.getElementById('appointments-fields');
-const appointmentsFields2 = document.getElementById('appointments-fields-2');
-
-// Current export mode
-let currentMode = null; // 'charts' or 'migration'
-let pendingMigration = false;
-const MAX_THREADS = 8;
-
-// Stats display elements
-const statsPdfs = document.getElementById('stats-pdfs');
-const statsUsers = document.getElementById('stats-users');
-
-// ============================================================================
-// STATE TRACKING
-// ============================================================================
-
-// Message counter
-let messageCount = 0; // Count error messages only
-const MAX_ERROR_LOG_ENTRIES = 500;
-
-// Stats tracking
-let pdfCount = 0;   // How many PDFs have we downloaded?
-let userCount = 0;  // How many patients have we processed?
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Reset all stats to zero for a new run
- */
-function resetStats() {
-  pdfCount = 0;
-  userCount = 0;
-  messageCount = 0;
-  statusMessages.innerHTML = '';
-  statusCount.textContent = '0 errors';
-  
-  // Update UI
-  statsPdfs.textContent = '0';
-  statsUsers.textContent = '0';
-}
-
-/**
- * Add a status message to the log
- */
-function updateStatus(message, type = 'info') {
-  // Only show errors in the log
-  if (type !== 'error') return;
-
-  // Create a timestamp for this message
-  const now = new Date();
-  const timestamp = now.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  });
-
-  // Create the message element
-  const messageElement = document.createElement('div');
-  messageElement.className = `status-message ${type}`;
-  messageElement.innerHTML = `<span class="timestamp">${timestamp}</span>${message}`;
-
-  // Add it to the log
-  statusMessages.appendChild(messageElement);
-
-  while (statusMessages.children.length > MAX_ERROR_LOG_ENTRIES) {
-    statusMessages.removeChild(statusMessages.firstElementChild);
-  }
-
-  // Update message counter
-  messageCount++;
-  const plural = messageCount !== 1 ? 's' : '';
-  statusCount.textContent = `${messageCount} error${plural}`;
-
-  // Auto-scroll only if user is already at/near the bottom (not manually scrolled up)
-  const isNearBottom = statusMessages.scrollHeight - statusMessages.scrollTop <= statusMessages.clientHeight + 50;
-  if (isNearBottom) {
-    statusMessages.scrollTop = statusMessages.scrollHeight;
-  }
-}
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Show fields for charts export
- */
-function showChartsFields() {
-  chartsFields.style.display = 'block';
-  chartsFields2.style.display = 'block';
-  appointmentsFields.style.display = 'none';
-  appointmentsFields2.style.display = 'none';
-  currentMode = 'charts';
-}
-
-/**
- * Show fields for migration export (appointments + patients)
- */
-function showMigrationFields() {
-  chartsFields.style.display = 'none';
-  chartsFields2.style.display = 'none';
-  appointmentsFields.style.display = 'block';
-  appointmentsFields2.style.display = 'block';
-  currentMode = 'migration';
-}
-
-// ============================================================================
-// EVENT HANDLERS
-// ============================================================================
-
-/**
- * Charts button - shows charts form fields
- */
-chartsBtn.addEventListener('click', () => {
-  showChartsFields();
-  chartsBtn.style.display = 'none';
-  migrationBtn.style.display = 'none';
-  startBtn.style.display = 'block';
-});
-
-/**
- * Migration button - shows migration form fields
- */
-migrationBtn.addEventListener('click', () => {
-  showMigrationFields();
-  chartsBtn.style.display = 'none';
-  migrationBtn.style.display = 'none';
-  startBtn.style.display = 'block';
-});
-
-/**
- * Ask Chrome for host permission on a specific clinic's janeapp.com subdomain.
- * The manifest declares the broad pattern under optional_host_permissions so
- * the extension ships with no standing access to any Jane clinic; this prompt
- * is the moment the user grants read/write for exactly the clinic they're
- * about to export. Chrome remembers the grant across sessions.
+ * Side panel controller for the staff-first export.
  *
- * Must be called synchronously from a user-gesture handler (click) — Chrome
- * silently returns false otherwise.
+ * UI states:
+ *   - form      : user is entering credentials + staff names
+ *   - resolving : preflight in flight, waiting for review rows
+ *   - review    : review table rendered, user confirming matches
+ *   - running   : discovery/download/profile in progress
+ *   - done      : final state, offer to start a new run
  */
+
+const MAX_THREADS = 8;
+const MAX_LOG_ENTRIES = 500;
+
+const els = {
+  formSection: document.getElementById('form-section'),
+  clinicName: document.getElementById('clinic-name'),
+  email: document.getElementById('email'),
+  password: document.getElementById('password'),
+  threadCount: document.getElementById('thread-count'),
+  staffNames: document.getElementById('staff-names'),
+  resolveBtn: document.getElementById('resolve-btn'),
+
+  reviewWrap: document.getElementById('review-wrap'),
+  reviewRows: document.getElementById('review-rows'),
+  reviewResolvedCount: document.getElementById('review-resolved-count'),
+  reviewTotalCount: document.getElementById('review-total-count'),
+  reviewSummary: document.getElementById('review-summary'),
+  backBtn: document.getElementById('back-btn'),
+  startBtn: document.getElementById('start-btn'),
+
+  stopBtn: document.getElementById('stop-btn'),
+
+  phaseStrip: document.getElementById('phase-strip'),
+  phaseLabel: document.getElementById('phase-label'),
+  phaseDetail: document.getElementById('phase-detail'),
+
+  statQueued: document.getElementById('stat-queued'),
+  statDone: document.getElementById('stat-done'),
+  statFailed: document.getElementById('stat-failed'),
+
+  statusMessages: document.getElementById('status-messages'),
+  statusCount: document.getElementById('status-count'),
+};
+
+let reviewRows = [];
+let messageCount = 0;
+
+function logStatus(message, type = 'info') {
+  const msg = document.createElement('div');
+  msg.className = `status-message ${type}`;
+  const ts = document.createElement('span');
+  ts.className = 'timestamp';
+  ts.textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const text = document.createTextNode(String(message));
+  msg.append(ts, text);
+  els.statusMessages.appendChild(msg);
+  while (els.statusMessages.children.length > MAX_LOG_ENTRIES) {
+    els.statusMessages.removeChild(els.statusMessages.firstElementChild);
+  }
+  messageCount += 1;
+  els.statusCount.textContent = `${messageCount} message${messageCount === 1 ? '' : 's'}`;
+  const nearBottom = els.statusMessages.scrollHeight - els.statusMessages.scrollTop <= els.statusMessages.clientHeight + 50;
+  if (nearBottom) els.statusMessages.scrollTop = els.statusMessages.scrollHeight;
+}
+
+function setUiState(state) {
+  const running = state === 'running' || state === 'done';
+  els.formSection.classList.toggle('hidden', state !== 'form');
+  els.reviewWrap.classList.toggle('visible', state === 'review');
+  els.stopBtn.classList.toggle('hidden', state !== 'running');
+  els.phaseStrip.classList.toggle('visible', running);
+  if (state === 'resolving') els.resolveBtn.disabled = true;
+  if (state === 'form') els.resolveBtn.disabled = false;
+}
+
+function setPhase(phase, extras = {}) {
+  const labels = {
+    idle: 'Idle',
+    preflight: 'Pre-flight (resolving staff names)',
+    discovery: 'Phase 1 · Discovery',
+    download: 'Phase 2 · Download',
+    profile: 'Phase 3 · Profiles',
+    done: 'Done',
+    stopped: 'Stopped',
+  };
+  els.phaseLabel.textContent = labels[phase] || phase;
+  const bits = [];
+  if (extras.staffCompleted != null && extras.totalStaff != null) {
+    bits.push(`${extras.staffCompleted}/${extras.totalStaff} staff`);
+  }
+  if (extras.tuplesFound != null) bits.push(`${extras.tuplesFound} charts found`);
+  if (extras.totalTuples != null) bits.push(`${extras.totalTuples} charts queued`);
+  els.phaseDetail.textContent = bits.join(' · ');
+}
+
+function updateStats(progress) {
+  if (!progress) return;
+  const queued = (progress.pending || 0) + (progress.in_flight || 0);
+  els.statQueued.textContent = String(queued);
+  els.statDone.textContent = String(progress.done || 0);
+  els.statFailed.textContent = String(progress.failed || 0);
+}
+
 async function ensureClinicPermission(clinicName) {
   const origin = `https://${clinicName}.janeapp.com/*`;
   try {
-    const already = await chrome.permissions.contains({ origins: [origin] });
-    if (already) return true;
+    const has = await chrome.permissions.contains({ origins: [origin] });
+    if (has) return true;
     return await chrome.permissions.request({ origins: [origin] });
   } catch (error) {
-    updateStatus(`❌ Permission check failed: ${error.message}`, 'error');
+    logStatus(`Permission check failed: ${error.message}`, 'error');
     return false;
   }
 }
 
-/**
- * Start button - validates form and starts export
- */
-startBtn.addEventListener('click', async () => {
-  // Get common form values
-  const clinicName = document.getElementById('clinic-name').value.trim();
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value.trim();
+els.resolveBtn.addEventListener('click', async () => {
+  const clinicName = els.clinicName.value.trim();
+  const email = els.email.value.trim();
+  const password = els.password.value;
+  const numThreads = parseInt(els.threadCount.value, 10);
+  const staffNames = els.staffNames.value;
 
   if (!clinicName || !email || !password) {
-    updateStatus('Please fill in clinic name, email, and password', 'error');
+    logStatus('Fill in clinic, email, password', 'error');
+    return;
+  }
+  if (!Number.isInteger(numThreads) || numThreads < 1 || numThreads > MAX_THREADS) {
+    logStatus(`Thread count must be 1..${MAX_THREADS}`, 'error');
+    return;
+  }
+  if (!staffNames.trim()) {
+    logStatus('Paste at least one staff name', 'error');
     return;
   }
 
-  // Request host permission for this specific clinic subdomain. Must happen
-  // inside the click handler (user gesture) and before any long async work
-  // that would invalidate the gesture.
   const permitted = await ensureClinicPermission(clinicName);
   if (!permitted) {
-    updateStatus(`❌ Permission required for ${clinicName}.janeapp.com — can't proceed`, 'error');
+    logStatus(`Permission required for ${clinicName}.janeapp.com`, 'error');
     return;
   }
 
-  if (currentMode === 'charts') {
-    // Validate charts-specific fields
-    const threadCount = parseInt(document.getElementById('thread-count').value, 10);
-    const maxIdInput = document.getElementById('max-id').value.trim();
-    const maxId = maxIdInput ? parseInt(maxIdInput, 10) : null;
+  setUiState('resolving');
+  logStatus('Starting pre-flight resolution…', 'info');
 
-    if (!threadCount || threadCount < 1 || threadCount > MAX_THREADS) {
-      updateStatus(`Thread count must be between 1 and ${MAX_THREADS}`, 'error');
+  chrome.runtime.sendMessage({
+    action: 'startStaffExport',
+    clinicName, email, password, numThreads, staffNames,
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      logStatus(`startStaffExport failed: ${chrome.runtime.lastError.message}`, 'error');
+      setUiState('form');
       return;
     }
-
-    // Switch UI to "running" mode
-    formSection.classList.add('hidden');
-    statusContainer.classList.add('expanded');
-    startBtn.style.display = 'none';
-    stopBtn.style.display = 'block';
-    stopBtn.disabled = false;
-
-    // Reset stats
-    resetStats();
-
-    const plural = threadCount > 1 ? 's' : '';
-    updateStatus(`Starting charts export with ${threadCount} thread${plural}...`);
-
-    // Tell background.js to start the worker threads
-    chrome.runtime.sendMessage({
-      action: 'startThreads',
-      clinicName,
-      email,
-      password,
-      startingIndex: 1,
-      numThreads: threadCount,
-      maxId,
-      resume: false
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
-        return;
-      }
-      
-      if (!response || !response.ok) {
-        updateStatus('❌ Could not start: ' + (response?.error || 'unknown'), 'error');
-      } else {
-      updateStatus(`✅ ${threadCount} thread${plural} started`);
-      }
-    });
-
-  } else if (currentMode === 'migration') {
-    // Validate appointments-specific fields (used for migration appointments export)
-    const startDate = document.getElementById('start-date').value;
-    const endDate = document.getElementById('end-date').value;
-
-    if (!startDate || !endDate) {
-      updateStatus('Please select both start and end dates', 'error');
-      return;
+    if (!response?.ok) {
+      logStatus(`startStaffExport rejected: ${response?.error || 'unknown'}`, 'error');
+      setUiState('form');
     }
-
-    if (new Date(startDate) > new Date(endDate)) {
-      updateStatus('Start date must be before end date', 'error');
-      return;
-    }
-
-    // Switch UI to "running" mode
-    formSection.classList.add('hidden');
-    statusContainer.classList.add('expanded');
-    startBtn.style.display = 'none';
-    stopBtn.style.display = 'block';
-    stopBtn.disabled = false;
-
-    // Reset stats
-    resetStats();
-
-    updateStatus('Starting migration export (appointments then patients)...');
-
-    pendingMigration = true;
-
-    // Tell background.js to start migration flow
-    // (clinicName, email, password are already set to hardcoded values above)
-    chrome.runtime.sendMessage({
-      action: 'startMigration',
-      clinicName,
-      email,
-      password,
-      startDate,
-      endDate
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        updateStatus('❌ Error: ' + chrome.runtime.lastError.message, 'error');
-        pendingMigration = false;
-        return;
-      }
-      if (!response || !response.ok) {
-        updateStatus('❌ Could not start migration: ' + (response?.error || 'unknown'), 'error');
-        pendingMigration = false;
-      }
-    });
-  }
-});
-
-/**
- * Stop button - stops all worker threads
- */
-stopBtn.addEventListener('click', async () => {
-  updateStatus('Stopping...', 'info');
-
-  // Set stop flags
-  await chrome.storage.local.set({ stopRequested: true, userRequestedStop: true });
-
-  // Tell background.js to stop all workers
-  chrome.runtime.sendMessage({ action: 'broadcastStop' }, (response) => {
-    if (!response || response.ok !== true) {
-      const error = response?.error || chrome.runtime.lastError?.message || 'unknown';
-      updateStatus('❌ Error stopping: ' + error, 'error');
-      return;
-    }
-    updateStatus('⏹️ Stop signal sent', 'info');
   });
 });
 
+els.backBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ action: 'stopExport' }, () => {
+    setUiState('form');
+    logStatus('Cancelled preflight, edit names and resolve again.', 'warn');
+  });
+});
 
-/**
- * Listen for status messages from worker threads
- * Updates the UI with progress and calculates stats
- */
+els.startBtn.addEventListener('click', () => {
+  const resolved = reviewRows
+    .filter((r) => r.status === 'ok' && r.picked)
+    .map((r) => ({
+      input_name: r.input_name,
+      staff_id: r.picked.staff_id,
+      staff_name: r.picked.staff_name,
+    }));
+  if (resolved.length === 0) {
+    logStatus('Nothing resolved — add staff and resolve first.', 'error');
+    return;
+  }
+  els.startBtn.disabled = true;
+  chrome.runtime.sendMessage({ action: 'confirmStaffResolution', resolvedStaff: resolved }, (response) => {
+    if (chrome.runtime.lastError) {
+      logStatus(`Start failed: ${chrome.runtime.lastError.message}`, 'error');
+      els.startBtn.disabled = false;
+      return;
+    }
+    if (!response?.ok) {
+      logStatus(`Start rejected: ${response?.error || 'unknown'}`, 'error');
+      els.startBtn.disabled = false;
+      return;
+    }
+    setUiState('running');
+    setPhase('discovery', { staffCompleted: 0, totalStaff: resolved.length });
+  });
+});
+
+els.stopBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ action: 'stopExport' }, (response) => {
+    if (response?.ok) logStatus('Stop signal sent', 'warn');
+  });
+});
+
+function buildReviewRowElement(row, rowIndex) {
+  const badgeInfo = row.status === 'ok' ? { cls: 'badge-ok', txt: '\u2713' }
+    : row.status === 'ambiguous' ? { cls: 'badge-warn', txt: '!' }
+    : { cls: 'badge-err', txt: '\u2717' };
+
+  const container = document.createElement('div');
+  container.className = 'review-row';
+
+  const badge = document.createElement('span');
+  badge.className = `badge ${badgeInfo.cls}`;
+  badge.textContent = badgeInfo.txt;
+
+  const nameWrap = document.createElement('div');
+  nameWrap.className = 'review-name';
+  const inputName = document.createElement('span');
+  inputName.className = 'input-name';
+  inputName.textContent = row.input_name;
+  const matchedName = document.createElement('span');
+  matchedName.className = 'matched-name';
+  nameWrap.append(inputName, matchedName);
+
+  const right = document.createElement('div');
+
+  if (row.status === 'ok' && row.picked) {
+    const piecesParts = [row.picked.staff_name];
+    if (row.picked.title) piecesParts.push(row.picked.title);
+    matchedName.textContent = piecesParts.join(' · ');
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'row-action';
+    removeBtn.textContent = 'remove';
+    removeBtn.onclick = () => { reviewRows.splice(rowIndex, 1); renderReview(); };
+    right.appendChild(removeBtn);
+  } else if (row.status === 'ambiguous') {
+    matchedName.textContent = `${row.candidates.length} candidates`;
+    const select = document.createElement('select');
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'pick one…';
+    select.appendChild(placeholder);
+    for (const c of row.candidates) {
+      const opt = document.createElement('option');
+      opt.value = String(c.staff_id);
+      opt.textContent = c.title ? `${c.staff_name} · ${c.title}` : c.staff_name;
+      select.appendChild(opt);
+    }
+    select.onchange = (event) => {
+      const pick = row.candidates.find((c) => String(c.staff_id) === String(event.target.value));
+      if (pick) {
+        row.status = 'ok';
+        row.picked = pick;
+        renderReview();
+      }
+    };
+    right.appendChild(select);
+  } else {
+    matchedName.textContent = 'not found';
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'row-action';
+    removeBtn.textContent = 'remove';
+    removeBtn.onclick = () => { reviewRows.splice(rowIndex, 1); renderReview(); };
+    right.appendChild(removeBtn);
+  }
+
+  container.append(badge, nameWrap, right);
+  return container;
+}
+
+function renderReview() {
+  els.reviewRows.replaceChildren();
+  let resolvedCount = 0;
+  for (let i = 0; i < reviewRows.length; i++) {
+    if (reviewRows[i].status === 'ok' && reviewRows[i].picked) resolvedCount += 1;
+    els.reviewRows.appendChild(buildReviewRowElement(reviewRows[i], i));
+  }
+  els.reviewResolvedCount.textContent = String(resolvedCount);
+  els.reviewTotalCount.textContent = String(reviewRows.length);
+  const unresolved = reviewRows.length - resolvedCount;
+  els.reviewSummary.textContent = unresolved === 0 ? 'all resolved' : `${unresolved} unresolved`;
+  els.startBtn.disabled = unresolved > 0 || reviewRows.length === 0;
+}
+
 chrome.runtime.onMessage.addListener((request) => {
   if (request.action === 'statusUpdate') {
-    const rawMessage = request.status.message || '';
-    const threadId = request.status.threadId;
-    // Prefix with the thread tag (e.g. "[T3]") so multi-thread logs are
-    // traceable. Messages from single-tab flows (appointments/migration) have
-    // no threadId and render unchanged.
-    const message = threadId ? `[${threadId}] ${rawMessage}` : rawMessage;
-
-    // Display the message (errors only)
-    updateStatus(message, request.status.type);
-
-    // Track stats based on message content
-    // (Messages include [T1], [T2] prefixes from different threads)
-    
-    // Patient completed
-    if (message.includes('✅ Completed patient ')) {
-      userCount++;
-      statsUsers.textContent = String(userCount);
+    const raw = request.status?.message || '';
+    const tag = request.status?.threadId ? `[${request.status.threadId}] ` : '';
+    logStatus(tag + raw, request.status?.type || 'info');
+    return;
+  }
+  if (request.action === 'preflightResults') {
+    reviewRows = (request.rows || []).map((r) => ({
+      input_name: r.input_name,
+      status: r.status,
+      candidates: r.candidates || [],
+      picked: r.status === 'ok' && r.candidates?.length === 1 ? r.candidates[0] : null,
+    }));
+    setUiState('review');
+    renderReview();
+    return;
+  }
+  if (request.action === 'phaseUpdate') {
+    setPhase(request.phase, request);
+    if (request.phase === 'done') {
+      setUiState('done');
     }
-
-    // PDF downloaded
-    if (message.includes('✅ Downloaded: ')) {
-      pdfCount++;
-      statsPdfs.textContent = String(pdfCount);
-    }
-
-    // Check if scraping is done
-    const isDone = message.includes('No more work available') || 
-                   message.includes('Scraping stopped');
-    
-    if (isDone) {
-      // Wait 2 seconds then reset UI
-      setTimeout(() => {
-        stopBtn.style.display = 'none';
-        startBtn.style.display = 'none';
-        chartsBtn.style.display = 'block';
-        migrationBtn.style.display = 'block';
-        formSection.classList.remove('hidden');
-        statusContainer.classList.remove('expanded');
-        currentMode = null;
-      }, 2000);
-    }
-
-    // Reset UI when migration flow finishes
-    if (pendingMigration && message.includes('Migration completed')) {
-      pendingMigration = false;
-      stopBtn.style.display = 'none';
-      startBtn.style.display = 'none';
-      chartsBtn.style.display = 'block';
-      migrationBtn.style.display = 'block';
-      formSection.classList.remove('hidden');
-      statusContainer.classList.remove('expanded');
-      currentMode = null;
-    }
+    return;
   }
 });
 
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.chartQueueProgress) {
+    updateStats(changes.chartQueueProgress.newValue);
+  }
+});
 
-/**
- * Check if scraping is already running when panel opens
- * (This handles the case where user closes and reopens the panel while scraping)
- */
-(async function initializePanel() {
-  try {
-    const data = await chrome.storage.local.get(['activeThreads']);
-    const activeThreads = data.activeThreads || {};
-    const threadCount = Object.keys(activeThreads).length;
-
-    if (threadCount > 0) {
-      // Scraping is running - switch to "stop" mode
-      console.log('Scraping already running - showing stop UI');
-      
-      formSection.classList.add('hidden');
-      statusContainer.classList.add('expanded');
-    chartsBtn.style.display = 'none';
-    migrationBtn.style.display = 'none';
-    startBtn.style.display = 'none';
-      stopBtn.style.display = 'block';
-      stopBtn.disabled = false;
-      
-      resetStats();
-      
-      const plural = threadCount > 1 ? 's' : '';
-      updateStatus(`Reconnected - ${threadCount} thread${plural} running`, 'info');
-    }
-  } catch (e) {
-    console.error('Failed to check running state:', e);
+(async function init() {
+  const data = await chrome.storage.local.get(['runState', 'chartQueueProgress']);
+  updateStats(data.chartQueueProgress);
+  if (data.runState && data.runState.phase && data.runState.phase !== 'idle' && data.runState.phase !== 'done') {
+    setUiState('running');
+    setPhase(data.runState.phase);
+    logStatus(`Reconnected (phase: ${data.runState.phase})`, 'info');
+  } else {
+    setUiState('form');
   }
 })();
-
-console.log('Side panel loaded');
