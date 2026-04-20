@@ -52,7 +52,7 @@ export const TIMEOUTS = {
 // ============================================================================
 
 export const THROTTLE = {
-  MIN_PDF_FETCH_GAP_MS: 2500,     // 2.5s - Minimum gap between PDF fetches per thread (avoid overwhelming server)
+  MIN_PDF_FETCH_GAP_MS: 4000,     // 4s - Minimum gap between PDF fetches per thread (avoid overwhelming server)
 };
 
 // ============================================================================
