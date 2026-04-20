@@ -43,6 +43,9 @@
   const { PdfDownloader } = await import(chrome.runtime.getURL('src/content/download/pdf-downloader.js'));
   const { FileChecker } = await import(chrome.runtime.getURL('src/content/download/file-checker.js'));
 
+  // Import staff-first phase dispatcher
+  const { createPhaseDispatcher } = await import(chrome.runtime.getURL('src/content/discovery/phase-dispatcher.js'));
+
   // Make imports available globally so rest of code can use them
   window._janeConstants = { TIMEOUTS, THROTTLE, RETRY, LIMITS, THREADING, SELECTORS, PATTERNS, STORAGE_KEYS, INDEXEDDB };
   window._Logger = Logger;
@@ -91,6 +94,7 @@ let currentPatientId = 1;      // Which patient we're working on right now
 let activeTimeouts = [];       // List of timeouts we can cancel if we need to stop
 let threadId = null;           // Our thread ID (like "T1" or "T2")
 let watchdogStarted = false;   // Page-local watchdog flag
+let phaseDispatcher = null;    // Staff-first phase dispatcher (set after threadId is known)
 
 // Helper: Get storage keys unique to this thread
 function getStorageKey(key) {
@@ -2365,6 +2369,51 @@ chrome.storage.local.get(getBootstrapStorageKeys(), async (result) => {
     startThreadWatchdog();
   }
 
+  // Staff-first phase dispatcher (new flow). Each phase handler reads its
+  // state from `{threadId}_phaseState` in chrome.storage.local so that a page
+  // reload resumes into the same phase mid-flight.
+  phaseDispatcher = createPhaseDispatcher({
+    getContext: () => ({
+      threadId,
+      logger,
+      pdfDownloader,
+      fileChecker,
+      shouldStop: () => shouldStop,
+      ensureLoggedIn: async (clinicName) => {
+        try {
+          if (await authModule.isAlreadyLoggedIn()) return true;
+        } catch (_) { /* keep trying below */ }
+        const credsKey = getStorageKey('credentials');
+        const wrap = await chrome.storage.local.get(credsKey);
+        const creds = wrap[credsKey] || {};
+        const email = creds.email;
+        const password = creds.password;
+        if (!email || !password) {
+          throw new Error(`ensureLoggedIn: missing credentials for ${threadId}`);
+        }
+        // Persist a basic scraping state so the existing post-login resume kicks
+        // in if the login form submission reloads the page before our phase
+        // handler can continue.
+        await chrome.storage.local.set({
+          [getStorageKey('credentials')]: { clinicName, email, password },
+        });
+        await authModule.login(email, password, {
+          shouldStop: () => shouldStop,
+          logger,
+        });
+        return true;
+      },
+    }),
+  });
+
+  // If a phaseState is present (page reloaded mid-phase), resume it.
+  try {
+    const resumed = await phaseDispatcher.resumeFromStorage();
+    if (resumed) return;
+  } catch (error) {
+    logger.error('Phase resume failed', error);
+  }
+
   const scopedState = threadId ? result[getStorageKey('scrapingState')] : null;
 
   // Check for explicit user stop; ignore transient stopRequested so threads auto-resume
@@ -2439,6 +2488,11 @@ chrome.storage.local.get(getBootstrapStorageKeys(), async (result) => {
 
 // Listen for stop command
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Staff-first phase messages route through the dispatcher first.
+  if (phaseDispatcher && ['initPreflight', 'beginDiscovery', 'beginDownload', 'beginProfile'].includes(request.action)) {
+    return phaseDispatcher.handleMessage(request, sender, sendResponse);
+  }
+
   if (request.action === 'stopScraping') {
     shouldStop = true;
     cancelAllTimeouts();
@@ -2446,7 +2500,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     // Clear all state
     chrome.storage.local.set({ stopRequested: true });
-    chrome.storage.local.remove([getStorageKey('scrapingState'), getStorageKey('credentials')]);
+    chrome.storage.local.remove([getStorageKey('scrapingState'), getStorageKey('credentials'), getStorageKey('phaseState')]);
 
     sendResponse({ success: true });
   } else if (request.action === 'initThread') {

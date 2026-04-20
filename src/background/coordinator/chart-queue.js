@@ -23,6 +23,7 @@ import {
   countByStatus,
   clearCharts,
   listCharts,
+  listDistinctPatientIds,
 } from '../storage/chart-db.js';
 
 const PROGRESS_KEY = 'chartQueueProgress';
@@ -155,6 +156,12 @@ export function handleChartQueueMessage(message, _sender, sendResponse) {
     case 'getQueueProgress':
       getQueueProgress()
         .then((progress) => sendResponse({ ok: true, progress }))
+        .catch((error) => sendResponse({ ok: false, error: error.message }));
+      return true;
+
+    case 'listPatientIds':
+      listDistinctPatientIds()
+        .then((ids) => sendResponse({ ok: true, ids }))
         .catch((error) => sendResponse({ ok: false, error: error.message }));
       return true;
 

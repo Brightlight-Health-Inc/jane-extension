@@ -29,7 +29,7 @@ import {
   getQueueProgress,
 } from './chart-queue.js';
 import { writeAllManifests } from '../manifest/manifest-writer.js';
-import { clearProfiles } from '../storage/chart-db.js';
+import { clearProfiles, putProfile } from '../storage/chart-db.js';
 
 const PHASES = Object.freeze({
   IDLE: 'idle',
@@ -351,6 +351,12 @@ export function handlePhaseMessage(request, sender, sendResponse) {
     case 'preflightResults':
       chrome.runtime.sendMessage({ action: 'preflightResults', rows: request.rows || [] });
       sendResponse({ ok: true });
+      return true;
+
+    case 'saveProfile':
+      putProfile(request.type, request.id, request.record || {}, request.profile_status || 'ok')
+        .then(() => sendResponse({ ok: true }))
+        .catch((e) => sendResponse({ ok: false, error: e.message }));
       return true;
 
     case 'getRunState':
