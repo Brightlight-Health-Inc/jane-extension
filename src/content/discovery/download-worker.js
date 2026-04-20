@@ -119,7 +119,20 @@ export async function runDownloadLoop({ threadId, clinicName, logger, shouldStop
     const pdfUrl = buildChartPdfUrl(clinicName, tuple.patient_id, tuple.chart_id);
 
     try {
-      await pdfDownloader.downloadRemotePdf(pdfUrl, filename, folder, shouldStop);
+      // Use the full fetch-with-cookies path (same as the old patient-sweep
+      // flow). The direct native download hits Jane's login redirect because
+      // chrome.downloads.download doesn't send the admin session the way
+      // fetch() does from the admin-page context.
+      const result = await pdfDownloader.downloadPdfWithCookies(
+        pdfUrl,
+        filename,
+        tuple.patient_name || `Patient_${tuple.patient_id}`,
+        tuple.patient_id,
+        { shouldStop }
+      );
+      if (!result?.success) {
+        throw new Error(result?.error || 'download failed');
+      }
       processed += 1;
       logger?.success?.(`[download] ${threadId} OK chart=${tuple.chart_id} file=${filename}`);
       await reportChartResult('completeChart', { chartId: tuple.chart_id, filePath: relativePath });
