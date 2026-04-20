@@ -308,7 +308,10 @@ chrome.runtime.onMessage.addListener((request) => {
       picked: r.status === 'ok' && r.candidates?.length === 1 ? r.candidates[0] : null,
     }));
 
-    if (autoConfirmPending) {
+    const allResolvedCleanly = reviewRows.length > 0
+      && reviewRows.every((r) => r.status === 'ok' && r.picked);
+
+    if (autoConfirmPending || allResolvedCleanly) {
       autoConfirmPending = false;
       const resolved = reviewRows
         .filter((r) => r.status === 'ok' && r.picked)
