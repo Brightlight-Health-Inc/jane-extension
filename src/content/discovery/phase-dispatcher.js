@@ -7,14 +7,9 @@
  *     admin after navigation) can resume the current phase mid-flight
  *   - defer to the discovery/walker/download/profile modules for the actual work
  *
- * Usage:
- *   const dispatcher = createPhaseDispatcher({ getContext });
- *   chrome.runtime.onMessage.addListener((req, sender, send) =>
- *     dispatcher.handleMessage(req, sender, send));
- *   await dispatcher.resumeFromStorage(); // on boot
- *
- * `getContext` returns { threadId, logger, pdfDownloader, fileChecker,
- *                        ensureLoggedIn(clinicName), shouldStop() }
+ * Logging: each phase emits `info` entries at entry + exit and on significant
+ * state transitions, so the panel log reads as a readable trace. The
+ * underlying modules emit their own finer-grained debug logs to the console.
  */
 
 import { resolveStaffList } from './staff-resolver.js';
@@ -42,95 +37,131 @@ export function createPhaseDispatcher({ getContext }) {
 
   async function runPreflight({ clinicName, staffNames }) {
     const ctx = getContext();
-    await ctx.ensureLoggedIn(clinicName);
-    await saveState({ action: 'preflight', clinicName, staffNames });
+    ctx.logger?.info?.('[phase] PRE-FLIGHT begin');
+    try {
+      await ctx.ensureLoggedIn(clinicName);
+      ctx.logger?.info?.('[phase] login confirmed, scanning staff directory');
+      await saveState({ action: 'preflight', clinicName, staffNames });
 
-    const { rows } = await resolveStaffList({
-      clinicName,
-      staffNames,
-      logger: ctx.logger,
-      shouldStop: ctx.shouldStop,
-    });
+      const { rows, directorySize } = await resolveStaffList({
+        clinicName,
+        staffNames,
+        logger: ctx.logger,
+        shouldStop: ctx.shouldStop,
+      });
 
-    chrome.runtime.sendMessage({ action: 'preflightResults', rows });
-    // intentionally don't clear state — user might reopen the panel and we
-    // want the last resolver snapshot on record until `beginDiscovery` lands
+      const ok = rows.filter((r) => r.status === 'ok').length;
+      const amb = rows.filter((r) => r.status === 'ambiguous').length;
+      const miss = rows.filter((r) => r.status === 'not_found').length;
+      ctx.logger?.info?.(`[phase] PRE-FLIGHT result: ${ok} ok, ${amb} ambiguous, ${miss} not-found (of ${directorySize} staff in directory)`);
+
+      chrome.runtime.sendMessage({ action: 'preflightResults', rows });
+    } catch (error) {
+      ctx.logger?.error?.(`[phase] PRE-FLIGHT failed: ${error.message}`);
+      throw error;
+    }
   }
 
   async function runDiscovery({ clinicName, resolvedStaff, staffIndex = 0 }) {
     const ctx = getContext();
-    await ctx.ensureLoggedIn(clinicName);
+    ctx.logger?.info?.(`[phase] DISCOVERY begin: ${resolvedStaff.length} staff total, resuming at index ${staffIndex}`);
+    try {
+      await ctx.ensureLoggedIn(clinicName);
 
-    let tuplesFound = 0;
-    for (let i = staffIndex; i < resolvedStaff.length; i++) {
-      if (ctx.shouldStop()) return;
-      const staff = resolvedStaff[i];
-      await saveState({ action: 'discovery', clinicName, resolvedStaff, staffIndex: i });
-      const res = await walkStaffEntries({
-        clinicName,
-        staffId: staff.staff_id,
-        staffName: staff.staff_name,
-        logger: ctx.logger,
-        shouldStop: ctx.shouldStop,
-      });
-      tuplesFound += res?.tuples || 0;
-      try {
-        chrome.runtime.sendMessage({
-          action: 'discoveryProgress',
-          staffCompleted: i + 1,
-          totalStaff: resolvedStaff.length,
-          tuplesFound,
+      let tuplesFound = 0;
+      for (let i = staffIndex; i < resolvedStaff.length; i++) {
+        if (ctx.shouldStop()) {
+          ctx.logger?.warn?.('[phase] discovery stopped by user');
+          return;
+        }
+        const staff = resolvedStaff[i];
+        ctx.logger?.info?.(`[phase] discovery staff ${i + 1}/${resolvedStaff.length}: ${staff.staff_name} (id=${staff.staff_id})`);
+        await saveState({ action: 'discovery', clinicName, resolvedStaff, staffIndex: i });
+        const res = await walkStaffEntries({
+          clinicName,
+          staffId: staff.staff_id,
+          staffName: staff.staff_name,
+          logger: ctx.logger,
+          shouldStop: ctx.shouldStop,
         });
-      } catch { /* panel may be closed */ }
-    }
+        tuplesFound += res?.tuples || 0;
+        try {
+          chrome.runtime.sendMessage({
+            action: 'discoveryProgress',
+            staffCompleted: i + 1,
+            totalStaff: resolvedStaff.length,
+            tuplesFound,
+          });
+        } catch { /* panel closed */ }
+      }
 
-    chrome.runtime.sendMessage({ action: 'discoveryComplete', totalTuples: tuplesFound });
-    await clearState();
+      ctx.logger?.info?.(`[phase] DISCOVERY complete: ${tuplesFound} tuples across ${resolvedStaff.length} staff`);
+      chrome.runtime.sendMessage({ action: 'discoveryComplete', totalTuples: tuplesFound });
+      await clearState();
+    } catch (error) {
+      ctx.logger?.error?.(`[phase] DISCOVERY failed: ${error.message}`);
+      throw error;
+    }
   }
 
   async function runDownload({ clinicName }) {
     const ctx = getContext();
-    await ctx.ensureLoggedIn(clinicName);
-    await saveState({ action: 'download', clinicName });
+    ctx.logger?.info?.(`[phase] DOWNLOAD begin for thread ${ctx.threadId}`);
+    try {
+      await ctx.ensureLoggedIn(clinicName);
+      await saveState({ action: 'download', clinicName });
 
-    await runDownloadLoop({
-      threadId: ctx.threadId,
-      clinicName,
-      logger: ctx.logger,
-      shouldStop: ctx.shouldStop,
-      pdfDownloader: ctx.pdfDownloader,
-      fileChecker: ctx.fileChecker,
-    });
+      await runDownloadLoop({
+        threadId: ctx.threadId,
+        clinicName,
+        logger: ctx.logger,
+        shouldStop: ctx.shouldStop,
+        pdfDownloader: ctx.pdfDownloader,
+        fileChecker: ctx.fileChecker,
+      });
 
-    await clearState();
+      ctx.logger?.info?.(`[phase] DOWNLOAD worker ${ctx.threadId} finished`);
+      await clearState();
+    } catch (error) {
+      ctx.logger?.error?.(`[phase] DOWNLOAD failed: ${error.message}`);
+      throw error;
+    }
   }
 
   async function runProfile({ clinicName }) {
     const ctx = getContext();
-    await ctx.ensureLoggedIn(clinicName);
-    await saveState({ action: 'profile', clinicName });
+    ctx.logger?.info?.('[phase] PROFILE begin');
+    try {
+      await ctx.ensureLoggedIn(clinicName);
+      await saveState({ action: 'profile', clinicName });
 
-    const resolvedStaffWrap = await chrome.storage.local.get('resolvedStaff');
-    const staffIds = (resolvedStaffWrap.resolvedStaff || [])
-      .map((s) => String(s.staff_id))
-      .filter(Boolean);
+      const resolvedStaffWrap = await chrome.storage.local.get('resolvedStaff');
+      const staffIds = (resolvedStaffWrap.resolvedStaff || [])
+        .map((s) => String(s.staff_id))
+        .filter(Boolean);
 
-    const patientIds = await requestPatientIdsFromBackground();
+      const patientIds = await requestPatientIdsFromBackground();
+      ctx.logger?.info?.(`[phase] profile targets: ${staffIds.length} staff, ${patientIds.length} patients`);
 
-    await scrapeAllProfiles({
-      clinicName,
-      staffIds,
-      patientIds,
-      logger: ctx.logger,
-      shouldStop: ctx.shouldStop,
-    });
+      await scrapeAllProfiles({
+        clinicName,
+        staffIds,
+        patientIds,
+        logger: ctx.logger,
+        shouldStop: ctx.shouldStop,
+      });
 
-    chrome.runtime.sendMessage({
-      action: 'profileComplete',
-      staff: staffIds.length,
-      patients: patientIds.length,
-    });
-    await clearState();
+      ctx.logger?.info?.('[phase] PROFILE complete, notifying background');
+      chrome.runtime.sendMessage({
+        action: 'profileComplete',
+        staff: staffIds.length,
+        patients: patientIds.length,
+      });
+      await clearState();
+    } catch (error) {
+      ctx.logger?.error?.(`[phase] PROFILE failed: ${error.message}`);
+      throw error;
+    }
   }
 
   async function requestPatientIdsFromBackground() {
@@ -148,18 +179,21 @@ export function createPhaseDispatcher({ getContext }) {
     const state = wrap[key];
     if (!state || !state.action) return false;
 
+    const ctx = getContext();
+    ctx.logger?.info?.(`[phase] resuming ${state.action} from persisted state`);
+
     switch (state.action) {
       case 'preflight':
-        runPreflight(state).catch((err) => console.warn('preflight resume failed', err));
+        runPreflight(state).catch((err) => ctx.logger?.error?.(`preflight resume failed: ${err.message}`));
         return true;
       case 'discovery':
-        runDiscovery(state).catch((err) => console.warn('discovery resume failed', err));
+        runDiscovery(state).catch((err) => ctx.logger?.error?.(`discovery resume failed: ${err.message}`));
         return true;
       case 'download':
-        runDownload(state).catch((err) => console.warn('download resume failed', err));
+        runDownload(state).catch((err) => ctx.logger?.error?.(`download resume failed: ${err.message}`));
         return true;
       case 'profile':
-        runProfile(state).catch((err) => console.warn('profile resume failed', err));
+        runProfile(state).catch((err) => ctx.logger?.error?.(`profile resume failed: ${err.message}`));
         return true;
       default:
         return false;
@@ -167,29 +201,34 @@ export function createPhaseDispatcher({ getContext }) {
   }
 
   function handleMessage(request, _sender, sendResponse) {
+    const ctx = getContext();
     switch (request.action) {
       case 'initPreflight':
+        ctx.logger?.debug?.(`[phase] received initPreflight for clinic=${request.clinicName}`);
         sendResponse({ ok: true });
         runPreflight({ clinicName: request.clinicName, staffNames: request.staffNames })
-          .catch((err) => console.warn('initPreflight failed', err));
+          .catch((err) => ctx.logger?.error?.(`initPreflight failed: ${err.message}`));
         return false;
 
       case 'beginDiscovery':
+        ctx.logger?.debug?.(`[phase] received beginDiscovery (${request.resolvedStaff?.length || 0} staff)`);
         sendResponse({ ok: true });
         runDiscovery({ clinicName: request.clinicName, resolvedStaff: request.resolvedStaff })
-          .catch((err) => console.warn('beginDiscovery failed', err));
+          .catch((err) => ctx.logger?.error?.(`beginDiscovery failed: ${err.message}`));
         return false;
 
       case 'beginDownload':
+        ctx.logger?.debug?.(`[phase] received beginDownload (thread=${request.threadId})`);
         sendResponse({ ok: true });
         runDownload({ clinicName: request.clinicName })
-          .catch((err) => console.warn('beginDownload failed', err));
+          .catch((err) => ctx.logger?.error?.(`beginDownload failed: ${err.message}`));
         return false;
 
       case 'beginProfile':
+        ctx.logger?.debug?.(`[phase] received beginProfile`);
         sendResponse({ ok: true });
         runProfile({ clinicName: request.clinicName })
-          .catch((err) => console.warn('beginProfile failed', err));
+          .catch((err) => ctx.logger?.error?.(`beginProfile failed: ${err.message}`));
         return false;
 
       default:

@@ -51,12 +51,17 @@ function serialize(fn) {
 }
 
 function notifyPanel(message, type = 'info') {
+  const prefix = type === 'error' ? '[orchestrator:error]'
+    : type === 'warn' ? '[orchestrator:warn]'
+    : '[orchestrator]';
+  console.log(`${prefix} ${message}`);
   try {
     chrome.runtime.sendMessage({ action: 'statusUpdate', status: { message, type } });
   } catch { /* panel may be closed */ }
 }
 
 function notifyPhase(phase, extras = {}) {
+  console.log(`[orchestrator] phase → ${phase}`, extras);
   try {
     chrome.runtime.sendMessage({ action: 'phaseUpdate', phase, ...extras });
   } catch { /* panel may be closed */ }

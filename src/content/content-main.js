@@ -2381,8 +2381,13 @@ chrome.storage.local.get(getBootstrapStorageKeys(), async (result) => {
       shouldStop: () => shouldStop,
       ensureLoggedIn: async (clinicName) => {
         try {
-          if (await authModule.isAlreadyLoggedIn()) return true;
-        } catch (_) { /* keep trying below */ }
+          if (await authModule.isAlreadyLoggedIn()) {
+            logger?.debug?.(`[auth] already logged in (thread=${threadId})`);
+            return true;
+          }
+        } catch (error) {
+          logger?.warn?.(`[auth] isAlreadyLoggedIn check threw: ${error.message}`);
+        }
         const credsKey = getStorageKey('credentials');
         const wrap = await chrome.storage.local.get(credsKey);
         const creds = wrap[credsKey] || {};
@@ -2391,16 +2396,15 @@ chrome.storage.local.get(getBootstrapStorageKeys(), async (result) => {
         if (!email || !password) {
           throw new Error(`ensureLoggedIn: missing credentials for ${threadId}`);
         }
-        // Persist a basic scraping state so the existing post-login resume kicks
-        // in if the login form submission reloads the page before our phase
-        // handler can continue.
+        logger?.info?.(`[auth] logging in for thread ${threadId}`);
         await chrome.storage.local.set({
           [getStorageKey('credentials')]: { clinicName, email, password },
         });
-        await authModule.login(email, password, {
+        const result = await authModule.login(email, password, {
           shouldStop: () => shouldStop,
           logger,
         });
+        logger?.info?.(`[auth] login result: ${JSON.stringify({ success: result?.success, alreadyLoggedIn: result?.alreadyLoggedIn, willReload: result?.willReload })}`);
         return true;
       },
     }),

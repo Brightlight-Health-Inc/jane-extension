@@ -26,92 +26,122 @@ import {
 const PANEL_SELECTOR = 'div.panel.panel-default.chart-entry.panel-no-gap';
 const DATE_SELECTOR = 'span[data-test-id="chart_entry_header_date"]';
 const TITLE_SELECTOR = 'span[data-test-id="chart_entry_header_title"]';
+const PATIENT_NAME_SELECTOR = 'span[data-test-id="chart_entry_header_patient_name"]';
 const HEADER_CONTAINER_SELECTOR = 'div.ellipsis-after-3-lines.flex-order-sm-2.flex-item.flex-pull-left';
+const AUTHOR_SELECTOR = '[data-testid="author-name"]';
 const PRINT_LINK_SELECTOR = 'a[href*="/admin/patients/"][href*="/chart_entries/"]';
 
 function buildStaffChartsUrl(clinicName, staffId) {
-  return `https://${clinicName}.janeapp.com/admin/staff/${staffId}/chart_entries`;
+  // Jane admin is a hash-routed SPA. #staff/<id>/charts is the "Charts" tab
+  // for the staff member which renders Chart Entries in the main pane.
+  return `https://${clinicName}.janeapp.com/admin#staff/${staffId}/charts`;
 }
 
 function textOf(el) {
   return el ? (el.textContent || '').trim() : '';
 }
 
-function extractPanelTuple(panel, { staffId, staffName }) {
+function extractPanelTuple(panel, { staffId, staffName, logger, index }) {
   const header = panel.querySelector(HEADER_CONTAINER_SELECTOR);
   const dateText = textOf(header?.querySelector(DATE_SELECTOR));
   const titleText = textOf(header?.querySelector(TITLE_SELECTOR));
+  const patientNameText = textOf(panel.querySelector(PATIENT_NAME_SELECTOR));
 
   const printLink = panel.querySelector(PRINT_LINK_SELECTOR);
   const href = printLink ? printLink.getAttribute('href') || '' : '';
   const chartIdMatch = href.match(PATTERNS.CHART_ENTRY_ID);
   const patientIdMatch = href.match(/\/admin\/patients\/(\d+)\//);
-  if (!chartIdMatch || !patientIdMatch) return null;
+  if (!chartIdMatch || !patientIdMatch) {
+    logger?.warn?.(`[walker] panel #${index} missing chart/patient id in href="${href}"`);
+    return null;
+  }
 
   const chartId = chartIdMatch[1];
   const patientId = patientIdMatch[1];
 
-  // The panel renders the patient name somewhere in the row. Jane's markup
-  // hasn't been fully pinned in our design recon, so we fall back through
-  // a few reasonable candidates.
-  const patientNameCandidate = panel.querySelector('[data-test-id="chart_entry_patient_name"]')
-    || panel.querySelector('a[href*="/admin/patients/"][href*="/profile"]')
-    || panel.querySelector('a[href^="/admin/patients/"]');
-  const patientName = textOf(patientNameCandidate);
+  const authorNode = panel.querySelector(AUTHOR_SELECTOR);
+  const authorText = textOf(authorNode);
 
-  return {
+  const tuple = {
     chart_id: chartId,
     chart_type: titleText || 'Chart',
     chart_date: dateText || null,
     patient_id: patientId,
-    patient_name: patientName || null,
+    patient_name: patientNameText || null,
     staff_id: String(staffId),
-    staff_name: staffName || null,
+    staff_name: staffName || authorText || null,
     chart_url: href.startsWith('http') ? href : `${window.location.origin}${href}`,
   };
+
+  logger?.debug?.(`[walker] panel #${index}: chart=${chartId} patient=${patientId} "${patientNameText}" date="${dateText}"`);
+  return tuple;
 }
 
-async function enqueueBatch(tuples) {
+async function enqueueBatch(tuples, logger) {
   if (!tuples.length) return;
-  await chrome.runtime.sendMessage({ action: 'enqueueCharts', tuples });
+  logger?.debug?.(`[walker] enqueueing ${tuples.length} tuples to background`);
+  const res = await chrome.runtime.sendMessage({ action: 'enqueueCharts', tuples });
+  logger?.debug?.(`[walker] enqueue response: added=${res?.added} total=${res?.progress?.total}`);
 }
 
 export async function walkStaffEntries({ clinicName, staffId, staffName, logger, shouldStop, onFreeze }) {
   const check = () => (shouldStop ? shouldStop() : false);
 
-  logger?.info?.(`Walking chart_entries for staff ${staffId} (${staffName})`);
-  window.location.href = buildStaffChartsUrl(clinicName, staffId);
-  await sleep(TIMEOUTS.CHARTS_PAGE_LOAD, { shouldStop });
+  const targetUrl = buildStaffChartsUrl(clinicName, staffId);
+  logger?.info?.(`[walker] BEGIN staff=${staffId} name="${staffName}" url=${targetUrl}`);
 
+  window.location.href = targetUrl;
+  await sleep(TIMEOUTS.CHARTS_PAGE_LOAD, { shouldStop });
+  logger?.debug?.(`[walker] post-nav currentUrl=${window.location.href}`);
+
+  logger?.debug?.('[walker] waiting for chart panels to render');
   const loaded = await waitForChartsLoaded({ maxWaitMs: TIMEOUTS.CHARTS_RENDER, shouldStop: check, logger });
-  if (check()) return { status: 'stopped', tuples: 0 };
+  if (check()) {
+    logger?.info?.('[walker] stopped during wait');
+    return { status: 'stopped', tuples: 0 };
+  }
   if (!loaded) {
     const freeze = await chrome.storage.local.get('frozen');
-    if (freeze?.frozen && onFreeze) await onFreeze({ clinicName, staffId });
+    if (freeze?.frozen && onFreeze) {
+      logger?.warn?.('[walker] page frozen, invoking onFreeze');
+      await onFreeze({ clinicName, staffId });
+    }
+    logger?.warn?.(`[walker] staff ${staffId}: waitForChartsLoaded returned false`);
     return { status: 'no_load', tuples: 0 };
   }
 
   const panelsNow = document.querySelectorAll(PANEL_SELECTOR);
+  logger?.debug?.(`[walker] initial panel count: ${panelsNow.length}`);
   if (panelsNow.length === 0) {
+    logger?.info?.(`[walker] staff ${staffId}: no chart panels`);
     return { status: 'no_charts', tuples: 0 };
   }
 
-  await loadAllCharts({ maxClicks: 500, shouldStop: check, logger });
+  logger?.debug?.('[walker] clicking Load More until all charts present');
+  const loadMoreCount = await loadAllCharts({ maxClicks: 500, shouldStop: check, logger });
+  logger?.debug?.(`[walker] Load More clicks: ${loadMoreCount}`);
 
   const panels = document.querySelectorAll(PANEL_SELECTOR);
+  logger?.info?.(`[walker] staff ${staffId}: extracting ${panels.length} panels`);
   const tuples = [];
+  let skipped = 0;
   for (let i = 0; i < panels.length; i++) {
-    if (check()) break;
+    if (check()) {
+      logger?.info?.('[walker] stop signal during extraction');
+      break;
+    }
     try {
-      const tuple = extractPanelTuple(panels[i], { staffId, staffName });
-      if (tuple) tuples.push(tuple);
+      const tuple = extractPanelTuple(panels[i], { staffId, staffName, logger, index: i });
+      if (tuple) tuples.push(tuple); else skipped += 1;
     } catch (error) {
-      logger?.warn?.(`Skipped one entry (${error.message})`);
+      logger?.warn?.(`[walker] panel #${i} threw: ${error.message}`);
+      skipped += 1;
     }
   }
+  if (skipped > 0) logger?.warn?.(`[walker] skipped ${skipped}/${panels.length} panels`);
 
-  await enqueueBatch(tuples);
-  logger?.info?.(`Enqueued ${tuples.length} tuples for staff ${staffId}`);
+  await enqueueBatch(tuples, logger);
+  logger?.info?.(`[walker] DONE staff=${staffId}: ${tuples.length} tuples enqueued, ${skipped} skipped`);
   return { status: 'ok', tuples: tuples.length };
 }
 

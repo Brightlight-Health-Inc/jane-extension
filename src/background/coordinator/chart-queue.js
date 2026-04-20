@@ -50,6 +50,7 @@ export async function enqueueCharts(tuples) {
   return serialize(async () => {
     const added = await addCharts(tuples);
     const progress = await refreshProgress();
+    console.log(`[chart-queue] enqueued ${added} tuples — totals: pending=${progress.pending} in_flight=${progress.in_flight} done=${progress.done} failed=${progress.failed}`);
     return { added, progress };
   });
 }
@@ -66,6 +67,7 @@ export async function requestChart(threadId) {
       // a long run self-heal without the user having to restart.
       const recovered = await sweepStaleClaims(STALE_CLAIM_THRESHOLD_MS);
       if (recovered > 0) {
+        console.warn(`[chart-queue] swept ${recovered} stale in_flight claims back to pending (threshold=${STALE_CLAIM_THRESHOLD_MS}ms)`);
         const retry = await claimNextPending(threadId);
         if (retry) {
           await refreshProgress();
@@ -73,7 +75,11 @@ export async function requestChart(threadId) {
         }
       }
       const counts = await countByStatus();
-      if (counts.pending === 0 && counts.in_flight === 0) return { status: 'done' };
+      if (counts.pending === 0 && counts.in_flight === 0) {
+        console.log(`[chart-queue] ${threadId}: queue fully drained`);
+        return { status: 'done' };
+      }
+      console.log(`[chart-queue] ${threadId}: no pending, ${counts.in_flight} in_flight — asking to wait`);
       return { status: 'wait' };
     }
     await refreshProgress();

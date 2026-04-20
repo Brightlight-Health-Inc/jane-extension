@@ -1,93 +1,73 @@
 /**
  * Phase 0 — resolve pasted staff names to Jane staff IDs.
  *
- * Strategy:
- *   1. Navigate to /admin/staff once to load Jane's full staff directory.
- *   2. Scroll the page to force any lazy-rendered rows into the DOM.
- *   3. Collect all anchor tags whose href matches /admin/staff/<numeric-id>
- *      and read the staff name from the link text. The adjacent cell (if
- *      present) is treated as the title/role.
- *   4. Locally fuzzy-match each parsed input name against that directory,
- *      classifying each row as ok / ambiguous / not_found.
+ * Jane's admin is a hash-routed SPA: staff URLs look like `#staff/<id>` and
+ * the full directory is always rendered in the left sidebar (`#user-list`)
+ * on any admin page. We harvest that sidebar once, then fuzzy-match each
+ * pasted name locally.
  *
- * Why local matching rather than driving the sidebar filter input:
- *   - One DOM snapshot instead of N typed queries — far fewer failure
- *     points and much faster.
- *   - Matching logic is deterministic and inspectable; no race against
- *     the search input's debounce.
+ * Row shape in the sidebar:
+ *   <li class="list-group-item [active]">
+ *     <div class="btn-toolbar"><a class="list-item-latch" href="#staff/50-18">…</a></div>   (merge btn, skip)
+ *     <a href="#staff/18">
+ *       <span class="first_name strong">Ambrose </span>
+ *       <span class="last_name">Currie </span>
+ *     </a>
+ *   </li>
  *
- * The set of candidate nodes returned by `querySelectorAll` is the only
- * DOM-dependent bit. If Jane renames classes or changes the anchor
- * format, this module is the one to retune — the matching itself is
- * pure string logic.
+ * The direct-child selector (`li > a[href*="#staff/"]`) ignores the merge
+ * button which is nested inside a div.
  */
 
 import { sleep } from '../../shared/utils/async-utils.js';
 import { parseStaffNames } from './name-parser.js';
 
-const STAFF_LINK_SELECTOR = 'a[href*="/admin/staff/"]';
-const STAFF_ID_PATTERN = /\/admin\/staff\/(\d+)(?:$|[/?#])/;
-const STAFF_DIRECTORY_PATH = '/admin/staff';
+const STAFF_LIST_CONTAINER = '#user-list';
+const STAFF_ROW_SELECTOR = '#user-list li.list-group-item > a[href^="#staff/"]';
+// Plain #staff/<id> only — skips merge button hrefs like #staff/50-18.
+const STAFF_ID_PATTERN = /^#staff\/(\d+)$/;
 
-function isStaffDirectoryUrl(url) {
-  return /\/admin\/staff(?:\b|$|[/?#])/.test(url);
+function isAdminUrl(url) {
+  return /\.janeapp\.com\/admin/.test(url);
 }
 
-async function ensureStaffDirectoryLoaded({ clinicName, shouldStop, logger }) {
-  const target = `https://${clinicName}.janeapp.com${STAFF_DIRECTORY_PATH}`;
-  if (!isStaffDirectoryUrl(window.location.href)) {
-    logger?.info?.('Navigating to staff directory');
-    window.location.href = target;
+async function ensureAdminLoaded({ clinicName, shouldStop, logger }) {
+  if (!isAdminUrl(window.location.href)) {
+    logger?.info?.('Navigating to Jane admin for staff directory');
+    window.location.href = `https://${clinicName}.janeapp.com/admin#staff`;
     await sleep(3500, { shouldStop });
+  } else if (!window.location.hash.startsWith('#staff')) {
+    // Hash-route to #staff to surface the sidebar if we're elsewhere in admin.
+    window.location.hash = '#staff';
+    await sleep(800, { shouldStop });
   }
 
   const start = Date.now();
-  while (Date.now() - start < 40000) {
+  while (Date.now() - start < 20000) {
     if (shouldStop?.()) throw new Error('stopped');
-    const anchors = document.querySelectorAll(STAFF_LINK_SELECTOR);
-    if (anchors.length > 0) break;
-    await sleep(500, { shouldStop });
+    if (document.querySelector(STAFF_ROW_SELECTOR)) return;
+    await sleep(400, { shouldStop });
   }
-
-  const container = document.scrollingElement || document.documentElement;
-  let lastCount = -1;
-  for (let pass = 0; pass < 8; pass++) {
-    if (shouldStop?.()) throw new Error('stopped');
-    container.scrollTop = container.scrollHeight;
-    await sleep(600, { shouldStop });
-    const count = document.querySelectorAll(STAFF_LINK_SELECTOR).length;
-    if (count === lastCount) break;
-    lastCount = count;
-  }
+  throw new Error('Staff directory did not load (no matching rows after 20s)');
 }
 
 function harvestStaffDirectory() {
   const byId = new Map();
-  const anchors = document.querySelectorAll(STAFF_LINK_SELECTOR);
+  const anchors = document.querySelectorAll(STAFF_ROW_SELECTOR);
   for (const anchor of anchors) {
     const href = anchor.getAttribute('href') || '';
     const match = href.match(STAFF_ID_PATTERN);
     if (!match) continue;
     const staffId = match[1];
-    const rawName = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
-    if (!rawName) continue;
     if (byId.has(staffId)) continue;
 
-    // Title column: look for a sibling cell or the next piece of text that
-    // isn't another staff link. We try a couple of common shapes. If none
-    // match, title stays empty — still a valid entry.
-    let title = '';
-    const row = anchor.closest('tr, li, .row, .panel');
-    if (row) {
-      const cells = row.querySelectorAll('td, .col, [role="cell"]');
-      for (const cell of cells) {
-        if (cell.contains(anchor)) continue;
-        const text = (cell.textContent || '').replace(/\s+/g, ' ').trim();
-        if (text && text !== rawName) { title = text; break; }
-      }
-    }
+    const first = (anchor.querySelector('.first_name')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const last = (anchor.querySelector('.last_name')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const rawName = `${first} ${last}`.replace(/\s+/g, ' ').trim()
+      || (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!rawName) continue;
 
-    byId.set(staffId, { staff_id: staffId, staff_name: rawName, title });
+    byId.set(staffId, { staff_id: staffId, staff_name: rawName, title: '' });
   }
   return [...byId.values()];
 }
@@ -155,9 +135,9 @@ export async function resolveStaffList({ clinicName, staffNames, logger, shouldS
   const parsed = parseStaffNames(staffNames);
   if (parsed.length === 0) return { rows: [], directorySize: 0 };
 
-  await ensureStaffDirectoryLoaded({ clinicName, shouldStop, logger });
+  await ensureAdminLoaded({ clinicName, shouldStop, logger });
   const directory = harvestStaffDirectory();
-  logger?.info?.(`Loaded staff directory: ${directory.length} records`);
+  logger?.info?.(`Staff directory loaded: ${directory.length} records`);
 
   const rows = parsed.map((p) => {
     const match = classifyMatches(p.search_query, directory);

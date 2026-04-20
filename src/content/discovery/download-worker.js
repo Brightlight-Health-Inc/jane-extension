@@ -71,25 +71,30 @@ async function alreadyOnDisk(filename, patientId) {
 }
 
 export async function runDownloadLoop({ threadId, clinicName, logger, shouldStop, pdfDownloader, fileChecker }) {
-  logger?.info?.(`Download worker ${threadId} starting`);
+  logger?.info?.(`[download] worker ${threadId} starting`);
+  let processed = 0;
+  let skipped = 0;
+  let failed = 0;
 
   while (!shouldStop?.()) {
     const res = await fetchNextTuple(threadId);
 
     if (res.status === 'done') {
-      logger?.info?.('Queue drained, worker reporting finished');
+      logger?.info?.(`[download] queue drained, worker ${threadId} finished (processed=${processed}, skipped=${skipped}, failed=${failed})`);
       await reportChartResult('workerFinishedDownload', { threadId });
       return;
     }
     if (res.status === 'stopped') {
+      logger?.info?.(`[download] worker ${threadId}: stopped flag set`);
       return;
     }
     if (res.status === 'wait') {
+      logger?.debug?.(`[download] worker ${threadId}: queue empty but in-flight work exists, waiting`);
       await sleep(EMPTY_QUEUE_BACKOFF_MS, { shouldStop });
       continue;
     }
     if (res.status === 'error' || !res.chart) {
-      logger?.warn?.(`requestChart error: ${res.error || 'unknown'}`);
+      logger?.warn?.(`[download] requestChart error: ${res.error || 'unknown'}`);
       await sleep(EMPTY_QUEUE_BACKOFF_MS, { shouldStop });
       continue;
     }
@@ -98,22 +103,25 @@ export async function runDownloadLoop({ threadId, clinicName, logger, shouldStop
     const folder = buildPatientFolder(tuple.patient_id, tuple.patient_name);
     const filename = buildFilename(tuple);
     const relativePath = `${folder}/${filename}`;
+    logger?.debug?.(`[download] worker ${threadId} claimed chart=${tuple.chart_id} patient=${tuple.patient_id} → ${relativePath}`);
 
     try {
       if (await alreadyOnDisk(filename, tuple.patient_id)) {
-        logger?.debug?.(`Skip (exists): ${relativePath}`);
+        logger?.debug?.(`[download] skip (already on disk): ${relativePath}`);
+        skipped += 1;
         await reportChartResult('completeChart', { chartId: tuple.chart_id, filePath: relativePath });
         continue;
       }
     } catch (error) {
-      logger?.warn?.(`file-check failed, proceeding: ${error.message}`);
+      logger?.warn?.(`[download] file-check failed, proceeding: ${error.message}`);
     }
 
     const pdfUrl = buildChartPdfUrl(clinicName, tuple.patient_id, tuple.chart_id);
 
     try {
       await pdfDownloader.downloadRemotePdf(pdfUrl, filename, folder, shouldStop);
-      logger?.success?.(`Downloaded ${filename}`);
+      processed += 1;
+      logger?.success?.(`[download] ${threadId} OK chart=${tuple.chart_id} file=${filename}`);
       await reportChartResult('completeChart', { chartId: tuple.chart_id, filePath: relativePath });
     } catch (error) {
       const msg = (error?.message || '').toLowerCase();
@@ -125,13 +133,14 @@ export async function runDownloadLoop({ threadId, clinicName, logger, shouldStop
         || msg.includes('pdf is empty');
 
       if (msg.includes('rate') || msg.includes('whoa there')) {
-        logger?.warn?.('Rate-limited during download, backing off');
+        logger?.warn?.(`[download] ${threadId} rate-limited, backing off ${RATE_LIMIT_BACKOFF_MS}ms`);
         await sleep(RATE_LIMIT_BACKOFF_MS, { shouldStop });
         await reportChartResult('failChart', { chartId: tuple.chart_id, reason: 'rate_limit', retriable: true });
         continue;
       }
 
-      logger?.error?.(`Download failed for chart ${tuple.chart_id}: ${error.message}`);
+      failed += 1;
+      logger?.error?.(`[download] ${threadId} FAIL chart=${tuple.chart_id}: ${error.message} (retriable=${retriable})`);
       await reportChartResult('failChart', {
         chartId: tuple.chart_id,
         reason: error.message || 'unknown',
@@ -140,5 +149,5 @@ export async function runDownloadLoop({ threadId, clinicName, logger, shouldStop
     }
   }
 
-  logger?.info?.(`Download worker ${threadId} stopping (stop signal)`);
+  logger?.info?.(`[download] worker ${threadId} stopping (processed=${processed}, skipped=${skipped}, failed=${failed})`);
 }
