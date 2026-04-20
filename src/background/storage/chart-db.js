@@ -193,8 +193,9 @@ export async function releaseInFlight(chartId) {
     record.status = STATUS.PENDING;
     record.claimed_by = null;
     record.claimed_at = null;
+    record.retry_count = (record.retry_count || 0) + 1;
     await reqAsPromise(store.put(record));
-    return true;
+    return { released: true, retry_count: record.retry_count };
   });
 }
 

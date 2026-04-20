@@ -29,6 +29,11 @@ import {
 } from '../storage/chart-db.js';
 
 const STALE_CLAIM_THRESHOLD_MS = 10 * 60 * 1000;
+// A chart that fails retriably more than this many times is parked as
+// permanently failed so it stops poisoning the queue. The downloader itself
+// already retries 3x per claim, so MAX_RETRIABLE_CYCLES=3 means each chart
+// gets up to ~9 total download attempts before we give up.
+const MAX_RETRIABLE_CYCLES = 3;
 
 const PROGRESS_KEY = 'chartQueueProgress';
 let mutationChain = Promise.resolve();
@@ -99,7 +104,13 @@ export async function completeChart({ chartId, filePath }) {
 export async function failChart({ chartId, reason, retriable }) {
   return serialize(async () => {
     if (retriable) {
-      await releaseInFlight(chartId);
+      const result = await releaseInFlight(chartId);
+      const retryCount = result?.retry_count || 0;
+      if (retryCount >= MAX_RETRIABLE_CYCLES) {
+        // Too many cycles — stop poisoning the queue and fail permanently.
+        console.warn(`[chart-queue] chart=${chartId} exceeded ${MAX_RETRIABLE_CYCLES} retriable cycles, marking permanently failed (last reason: ${reason})`);
+        await markFailed(chartId, `exhausted_retries: ${reason || 'unknown'}`);
+      }
     } else {
       await markFailed(chartId, reason || 'unknown');
     }
@@ -110,7 +121,8 @@ export async function failChart({ chartId, reason, retriable }) {
 
 export async function releaseChart(chartId) {
   return serialize(async () => {
-    const released = await releaseInFlight(chartId);
+    const result = await releaseInFlight(chartId);
+    const released = !!result?.released;
     if (released) await refreshProgress();
     return { ok: released };
   });
