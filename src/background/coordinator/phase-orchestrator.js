@@ -368,10 +368,10 @@ export function handlePhaseMessage(request, sender, sendResponse) {
       onProfileComplete(request).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e.message }));
       return true;
 
-    case 'preflightResults':
-      chrome.runtime.sendMessage({ action: 'preflightResults', rows: request.rows || [] });
-      sendResponse({ ok: true });
-      return true;
+    // Note: `preflightResults` is broadcast directly by the content script via
+    // chrome.runtime.sendMessage, which already reaches the side panel — we
+    // intentionally do NOT re-handle it here to avoid the panel processing
+    // the same message twice and flipping its UI back to the form mid-run.
 
     case 'saveProfile':
       putProfile(request.type, request.id, request.record || {}, request.profile_status || 'ok')

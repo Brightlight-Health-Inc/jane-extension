@@ -39,9 +39,12 @@ export function createPhaseDispatcher({ getContext }) {
     const ctx = getContext();
     ctx.logger?.info?.('[phase] PRE-FLIGHT begin');
     try {
+      // Save state BEFORE login: the login form submit reloads the page, and
+      // if we saved after, the storage write can race against unload and be
+      // lost — leaving the content script with no way to resume preflight.
+      await saveState({ action: 'preflight', clinicName, staffNames });
       await ctx.ensureLoggedIn(clinicName);
       ctx.logger?.info?.('[phase] login confirmed, scanning staff directory');
-      await saveState({ action: 'preflight', clinicName, staffNames });
 
       const { rows, directorySize } = await resolveStaffList({
         clinicName,
@@ -69,6 +72,7 @@ export function createPhaseDispatcher({ getContext }) {
     const ctx = getContext();
     ctx.logger?.info?.(`[phase] DISCOVERY begin: ${resolvedStaff.length} staff total, resuming at index ${staffIndex}`);
     try {
+      await saveState({ action: 'discovery', clinicName, resolvedStaff, staffIndex });
       await ctx.ensureLoggedIn(clinicName);
 
       let tuplesFound = 0;
@@ -111,8 +115,8 @@ export function createPhaseDispatcher({ getContext }) {
     const ctx = getContext();
     ctx.logger?.info?.(`[phase] DOWNLOAD begin for thread ${ctx.threadId}`);
     try {
-      await ctx.ensureLoggedIn(clinicName);
       await saveState({ action: 'download', clinicName });
+      await ctx.ensureLoggedIn(clinicName);
 
       await runDownloadLoop({
         threadId: ctx.threadId,
@@ -135,8 +139,8 @@ export function createPhaseDispatcher({ getContext }) {
     const ctx = getContext();
     ctx.logger?.info?.('[phase] PROFILE begin');
     try {
-      await ctx.ensureLoggedIn(clinicName);
       await saveState({ action: 'profile', clinicName });
+      await ctx.ensureLoggedIn(clinicName);
 
       const resolvedStaffWrap = await chrome.storage.local.get('resolvedStaff');
       const staffIds = (resolvedStaffWrap.resolvedStaff || [])

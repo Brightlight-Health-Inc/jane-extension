@@ -22,7 +22,16 @@ export async function sendMessageWithRetry(tabId, message, maxAttempts = 30, del
       chrome.tabs.sendMessage(tabId, message, (_response) => {
         if (chrome.runtime.lastError) {
           if (attempt >= maxAttempts) {
-            console.warn(`[thread-manager] giving up after ${maxAttempts} attempts to tab ${tabId}: ${chrome.runtime.lastError.message}`);
+            const err = chrome.runtime.lastError.message || 'unknown';
+            const msg = `[thread-manager] giving up after ${maxAttempts} attempts to tab ${tabId} (${message?.action}): ${err}`;
+            console.warn(msg);
+            try {
+              // Surface to panel so the user sees the failure instead of a silent stall.
+              chrome.runtime.sendMessage({
+                action: 'statusUpdate',
+                status: { message: `Tab ${tabId} unreachable for action=${message?.action}: ${err}`, type: 'error' },
+              });
+            } catch { /* panel may be closed */ }
             return resolve(false);
           }
           setTimeout(trySend, delayMs);
