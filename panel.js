@@ -45,6 +45,7 @@ const els = {
 
 let reviewRows = [];
 let messageCount = 0;
+let autoConfirmPending = false;
 
 function logStatus(message, type = 'info') {
   const msg = document.createElement('div');
@@ -129,9 +130,10 @@ els.resolveBtn.addEventListener('click', async () => {
     logStatus(`Thread count must be 1..${MAX_THREADS}`, 'error');
     return;
   }
-  if (!staffNames.trim()) {
-    logStatus('Paste at least one staff name', 'error');
-    return;
+
+  autoConfirmPending = !staffNames.trim();
+  if (autoConfirmPending) {
+    logStatus('No names provided — will process all staff in directory', 'info');
   }
 
   const permitted = await ensureClinicPermission(clinicName);
@@ -199,6 +201,7 @@ els.stopBtn.addEventListener('click', () => {
   // Optimistic UI: snap back to the form immediately so the user isn't
   // hunting for feedback while the background tears down worker tabs.
   reviewRows = [];
+  autoConfirmPending = false;
   els.reviewRows.replaceChildren();
   setUiState('form');
   setPhase('stopped');
@@ -303,6 +306,34 @@ chrome.runtime.onMessage.addListener((request) => {
       candidates: r.candidates || [],
       picked: r.status === 'ok' && r.candidates?.length === 1 ? r.candidates[0] : null,
     }));
+
+    if (autoConfirmPending) {
+      autoConfirmPending = false;
+      const resolved = reviewRows
+        .filter((r) => r.status === 'ok' && r.picked)
+        .map((r) => ({
+          input_name: r.input_name,
+          staff_id: r.picked.staff_id,
+          staff_name: r.picked.staff_name,
+        }));
+      if (resolved.length === 0) {
+        logStatus('No staff found in directory — check login and try again', 'error');
+        setUiState('form');
+        return;
+      }
+      logStatus(`Auto-starting with ${resolved.length} staff`, 'info');
+      chrome.runtime.sendMessage({ action: 'confirmStaffResolution', resolvedStaff: resolved }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          logStatus(`Auto-start failed: ${response?.error || chrome.runtime.lastError?.message || 'unknown'}`, 'error');
+          setUiState('form');
+          return;
+        }
+        setUiState('running');
+        setPhase('discovery', { staffCompleted: 0, totalStaff: resolved.length });
+      });
+      return;
+    }
+
     setUiState('review');
     renderReview();
     return;

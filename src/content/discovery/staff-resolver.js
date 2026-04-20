@@ -133,11 +133,20 @@ function classifyMatches(query, directory) {
 
 export async function resolveStaffList({ clinicName, staffNames, logger, shouldStop }) {
   const parsed = parseStaffNames(staffNames);
-  if (parsed.length === 0) return { rows: [], directorySize: 0 };
 
   await ensureAdminLoaded({ clinicName, shouldStop, logger });
   const directory = harvestStaffDirectory();
   logger?.info?.(`Staff directory loaded: ${directory.length} records`);
+
+  if (parsed.length === 0) {
+    logger?.info?.(`No names provided — auto-resolving all ${directory.length} staff`);
+    const rows = directory.map((entry) => ({
+      input_name: entry.staff_name,
+      status: 'ok',
+      candidates: [entry],
+    }));
+    return { rows, directorySize: directory.length };
+  }
 
   const rows = parsed.map((p) => {
     const match = classifyMatches(p.search_query, directory);
