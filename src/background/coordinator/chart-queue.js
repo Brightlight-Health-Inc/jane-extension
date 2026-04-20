@@ -24,7 +24,10 @@ import {
   clearCharts,
   listCharts,
   listDistinctPatientIds,
+  sweepStaleClaims,
 } from '../storage/chart-db.js';
+
+const STALE_CLAIM_THRESHOLD_MS = 10 * 60 * 1000;
 
 const PROGRESS_KEY = 'chartQueueProgress';
 let mutationChain = Promise.resolve();
@@ -58,6 +61,17 @@ export async function requestChart(threadId) {
 
     const claimed = await claimNextPending(threadId);
     if (!claimed) {
+      // Before declaring "done" or "wait", evict any stale in_flight claims
+      // that look abandoned (tab crashed, crashed tab mid-download). This lets
+      // a long run self-heal without the user having to restart.
+      const recovered = await sweepStaleClaims(STALE_CLAIM_THRESHOLD_MS);
+      if (recovered > 0) {
+        const retry = await claimNextPending(threadId);
+        if (retry) {
+          await refreshProgress();
+          return { status: 'ok', chart: retry };
+        }
+      }
       const counts = await countByStatus();
       if (counts.pending === 0 && counts.in_flight === 0) return { status: 'done' };
       return { status: 'wait' };

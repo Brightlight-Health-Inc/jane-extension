@@ -167,6 +167,29 @@ export async function recoverInFlight() {
   }));
 }
 
+export async function sweepStaleClaims(staleAfterMs) {
+  const threshold = Date.now() - staleAfterMs;
+  return runTx(STORES.CHARTS, 'readwrite', (store) => new Promise((resolve, reject) => {
+    let count = 0;
+    const index = store.index('status');
+    const cursorReq = index.openCursor(IDBKeyRange.only(STATUS.IN_FLIGHT));
+    cursorReq.onerror = () => reject(cursorReq.error);
+    cursorReq.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (!cursor) { resolve(count); return; }
+      const record = cursor.value;
+      if (record.claimed_at && record.claimed_at < threshold) {
+        record.status = STATUS.PENDING;
+        record.claimed_by = null;
+        record.claimed_at = null;
+        cursor.update(record);
+        count += 1;
+      }
+      cursor.continue();
+    };
+  }));
+}
+
 export async function countByStatus() {
   return runTx(STORES.CHARTS, 'readonly', async (store) => {
     const index = store.index('status');
