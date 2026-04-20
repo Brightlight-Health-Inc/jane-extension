@@ -102,13 +102,7 @@ function getStorageKey(key) {
 }
 
 function getBootstrapStorageKeys() {
-  const keys = ['frozen', 'stopRequested', 'userRequestedStop', 'appointmentsState', 'migrationState', 'patientsState'];
-
-  for (let i = 1; i <= THREADING.MAX_THREADS; i++) {
-    keys.push(`T${i}_scrapingState`);
-  }
-
-  return keys;
+  return ['frozen', 'stopRequested', 'userRequestedStop'];
 }
 
 function startThreadWatchdog() {
@@ -2418,74 +2412,12 @@ chrome.storage.local.get(getBootstrapStorageKeys(), async (result) => {
     logger.error('Phase resume failed', error);
   }
 
-  const scopedState = threadId ? result[getStorageKey('scrapingState')] : null;
-
-  // Check for explicit user stop; ignore transient stopRequested so threads auto-resume
+  // Honour explicit user stop.
   if (result.userRequestedStop || shouldStop) {
-    chrome.storage.local.remove(['stopRequested', 'userRequestedStop', getStorageKey('scrapingState'), 'appointmentsState', 'migrationState', 'patientsState']);
+    chrome.storage.local.remove(['stopRequested', 'userRequestedStop']);
     sendStatus('⏹️ Scraping stopped', 'info');
     return;
   }
-
-  // Early global freeze/rate-limit detection only when we're resuming active work
-  try {
-    if (result && (result.migrationState || result.appointmentsState || scopedState)) {
-      if (document.readyState === 'loading') {
-        await new Promise(r => document.addEventListener('DOMContentLoaded', r));
-      }
-      await sleep(200);
-      await detectAndHandleRateLimit();
-    }
-  } catch (error) {
-      logger.error('Operation failed', error);
-    }
-
-  // Resume migration flow if present
-  if (result && result.migrationState) {
-    if (document.readyState === 'loading') {
-      await new Promise(r => document.addEventListener('DOMContentLoaded', r));
-    }
-    await runMigrationFlow(result.migrationState, { fromResume: true });
-    return;
-  }
-
-  // Resume appointments flow if present
-  if (result && result.appointmentsState) {
-    if (document.readyState === 'loading') {
-      await new Promise(r => document.addEventListener('DOMContentLoaded', r));
-    }
-    await runAppointmentsFlow(result.appointmentsState, { fromResume: true });
-    return;
-  }
-
-  // Resume from saved state if exists
-  if (!scopedState) return;
-
-  if (document.readyState === 'loading') {
-    await new Promise(r => document.addEventListener('DOMContentLoaded', r));
-  }
-  await sleep(500);
-
-  // Handle different state actions
-  if (scopedState.action === 'downloadChart') {
-    return await handleChartDownload(scopedState);
-  }
-
-  if (scopedState.action === 'postLogin') {
-    return await handlePostLogin(scopedState);
-  }
-
-  if (scopedState.action === 'requestWork') {
-    await chrome.storage.local.remove([getStorageKey('scrapingState')]);
-    // If we have a resumePatientId, continue with that patient instead of requesting new work
-    if (scopedState.resumePatientId) {
-      sendStatus(`🔄 Resuming patient ${scopedState.resumePatientId}...`, 'info');
-      return await continueScrapingFromPatient(scopedState.clinicName, scopedState.resumePatientId);
-    }
-    return await requestNextWork(scopedState.clinicName);
-  }
-
-  // No more complex recovery phases - downloadChart action handles everything
 });
 
 // Simplified: no complex fallback logic needed
@@ -2502,87 +2434,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     cancelAllTimeouts();
     sendStatus('⏹️ Scraping stopped', 'info');
 
-    // Clear all state
     chrome.storage.local.set({ stopRequested: true });
     chrome.storage.local.remove([getStorageKey('scrapingState'), getStorageKey('credentials'), getStorageKey('phaseState')]);
 
     sendResponse({ success: true });
-  } else if (request.action === 'initThread') {
-    threadId = request.threadId;
-    logger.setThreadId(threadId); // Update logger with thread ID
-    const loginDelayMs = request.loginDelayMs || 0;
-
-    sendResponse({ ok: true, threadId });
-
-    (async () => {
-      const { clinicName, email, password } = request;
-
-      if (loginDelayMs > 0) {
-        sendStatus(`⏳ Waiting ${loginDelayMs / 1000}s before starting...`);
-        await sleep(loginDelayMs);
-      }
-
-      sendStatus(`🚀 Starting scraping process...`);
-
-      // Save credentials for this thread
-      await chrome.storage.local.set({
-        [getStorageKey('credentials')]: { clinicName, email, password }
-      });
-
-      // Check if we need to login
-      if (document.readyState === 'loading') {
-        await new Promise(r => document.addEventListener('DOMContentLoaded', r));
-      }
-      await sleep(1000);
-
-      const loginFormPresent = !!document.querySelector('input[name="auth_key"], input#auth_key');
-
-      if (loginFormPresent) {
-        // Use startScraping so post-login state is saved and resume works after reload
-        sendStatus(`🔐 Logging in...`);
-        await startScraping(clinicName, email, password);
-      } else {
-        // Already logged in - just request work
-        sendStatus(`✅ Already logged in!`);
-        scheduleNextWorkRequest(clinicName);
-      }
-    })();
-    return true;
-  } else if (request.action === 'initAppointments') {
-    (async () => {
-      try {
-        appointmentsState = {
-          clinicName: request.clinicName,
-          email: request.email,
-          password: request.password,
-          startDate: request.startDate,
-          endDate: request.endDate
-        };
-        await runAppointmentsFlow(appointmentsState);
-        sendResponse({ ok: true });
-      } catch (e) {
-        sendResponse({ ok: false, error: e?.message || String(e) });
-      }
-    })();
-    return true;
-  } else if (request.action === 'initMigration') {
-    (async () => {
-      try {
-        migrationState = {
-          clinicName: request.clinicName,
-          email: request.email,
-          password: request.password,
-          startDate: request.startDate,
-          endDate: request.endDate
-        };
-        await runMigrationFlow(migrationState);
-        sendResponse({ ok: true });
-      } catch (e) {
-        sendResponse({ ok: false, error: e?.message || String(e) });
-      }
-    })();
-    return true;
-  // Global pause/resume message handlers removed
   }
 });
 
