@@ -110,24 +110,17 @@ export function createPhaseDispatcher({ getContext }) {
     await ctx.ensureLoggedIn(clinicName);
     await saveState({ action: 'profile', clinicName });
 
-    const progress = await chrome.runtime.sendMessage({ action: 'getQueueProgress' });
-    const wantStaffIds = progress?.progress?.staff_ids || [];
-    const wantPatientIds = progress?.progress?.patient_ids || [];
-
     const resolvedStaffWrap = await chrome.storage.local.get('resolvedStaff');
     const staffIds = (resolvedStaffWrap.resolvedStaff || [])
-      .map((s) => String(s.staff_id));
+      .map((s) => String(s.staff_id))
+      .filter(Boolean);
 
-    const charts = await chrome.runtime.sendMessage({ action: 'getQueueProgress' });
-    // If the background exposes chart listing via a message, use it; otherwise,
-    // ask for patient ids via a dedicated message.
-    const uniquePatientIds = wantPatientIds.length > 0 ? wantPatientIds
-      : await requestPatientIdsFromBackground();
+    const patientIds = await requestPatientIdsFromBackground();
 
     await scrapeAllProfiles({
       clinicName,
-      staffIds: staffIds.length > 0 ? staffIds : wantStaffIds,
-      patientIds: uniquePatientIds,
+      staffIds,
+      patientIds,
       logger: ctx.logger,
       shouldStop: ctx.shouldStop,
     });
@@ -135,7 +128,7 @@ export function createPhaseDispatcher({ getContext }) {
     chrome.runtime.sendMessage({
       action: 'profileComplete',
       staff: staffIds.length,
-      patients: uniquePatientIds.length,
+      patients: patientIds.length,
     });
     await clearState();
   }
