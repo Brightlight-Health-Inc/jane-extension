@@ -19,8 +19,12 @@ import { cleanFilename } from '../../shared/utils/string-utils.js';
 const RATE_LIMIT_BACKOFF_MS = 8000;
 // SERVER_FAILED from Jane's download endpoint is usually a soft rate-limit
 // (server returns 5xx under load), not a permanently-broken chart. Pause all
-// workers longer than a normal rate-limit so the server has room to recover.
-const SERVER_FAILED_BACKOFF_MS = 30000;
+// workers long enough for Jane's rate window to fully reset — short pauses
+// just wake everyone up simultaneously and re-trigger the limit.
+const SERVER_FAILED_BACKOFF_MS = 60000;
+// Random extra wait each worker adds so 4 workers don't burst Jane in sync
+// when the shared pause expires.
+const WAKE_JITTER_MAX_MS = 8000;
 const EMPTY_QUEUE_BACKOFF_MS = 4000;
 
 function buildChartPdfUrl(clinicName, patientId, chartId) {
@@ -159,11 +163,14 @@ export async function runDownloadLoop({ threadId, clinicName, logger, shouldStop
 
       if (msg.includes('server_failed')) {
         // Jane's download endpoint returns 5xx when overloaded by our burst.
-        // Raise the global gate so every worker pauses, not just this one —
-        // otherwise the siblings keep pushing and we never catch up.
-        logger?.warn?.(`[download] ${threadId} server overload (SERVER_FAILED), pausing all workers ${SERVER_FAILED_BACKOFF_MS}ms`);
+        // Raise the global gate so every worker pauses, then sleep a jittered
+        // amount so siblings don't all wake up and re-burst at the same
+        // instant — that was re-triggering the limit every cycle.
+        const jitter = Math.floor(Math.random() * WAKE_JITTER_MAX_MS);
+        const localSleepMs = SERVER_FAILED_BACKOFF_MS + jitter;
+        logger?.warn?.(`[download] ${threadId} server overload (SERVER_FAILED), pausing ${Math.round(localSleepMs / 1000)}s (base=${SERVER_FAILED_BACKOFF_MS / 1000}s + jitter=${Math.round(jitter / 1000)}s)`);
         await chrome.storage.local.set({ rateLimitUntil: Date.now() + SERVER_FAILED_BACKOFF_MS });
-        await sleep(SERVER_FAILED_BACKOFF_MS, { shouldStop });
+        await sleep(localSleepMs, { shouldStop });
         await reportChartResult('failChart', { chartId: tuple.chart_id, reason: 'server_failed', retriable: true });
         continue;
       }
