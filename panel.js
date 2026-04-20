@@ -67,9 +67,10 @@ function logStatus(message, type = 'info') {
 
 function setUiState(state) {
   const running = state === 'running' || state === 'done';
+  const inProgress = state === 'resolving' || state === 'review' || state === 'running';
   els.formSection.classList.toggle('hidden', state !== 'form');
   els.reviewWrap.classList.toggle('visible', state === 'review');
-  els.stopBtn.classList.toggle('hidden', state !== 'running');
+  els.stopBtn.classList.toggle('hidden', !inProgress);
   els.phaseStrip.classList.toggle('visible', running);
   if (state === 'resolving') els.resolveBtn.disabled = true;
   if (state === 'form') els.resolveBtn.disabled = false;
