@@ -247,32 +247,84 @@ export async function scrapeStaffProfileById({ clinicName, staffId, logger, shou
   return { staffId, profile_status, captured };
 }
 
+const RETRY_PASSES = 2;
+const RETRY_PASS_COOLDOWN_MS = 60000;
+
 export async function scrapeAllProfiles({ clinicName, staffIds, patientIds, logger, shouldStop, onRateLimitCheck }) {
-  const staffResults = [];
-  const patientResults = [];
+  const staffResults = new Map();
+  const patientResults = new Map();
 
   logger?.info?.(`[profile] PHASE 3 begin: ${staffIds?.length || 0} staff + ${patientIds?.length || 0} patients`);
 
+  async function scrapeStaff(id) {
+    if (onRateLimitCheck) await onRateLimitCheck();
+    try {
+      const res = await scrapeStaffProfileById({ clinicName, staffId: id, logger, shouldStop });
+      staffResults.set(String(id), res);
+      return res;
+    } catch (error) {
+      logger?.error?.(`[profile] staff ${id} scrape threw: ${error.message}`);
+      staffResults.set(String(id), { staffId: id, profile_status: 'failed', error: error.message });
+      return null;
+    }
+  }
+
+  async function scrapePatient(id) {
+    if (onRateLimitCheck) await onRateLimitCheck();
+    try {
+      const res = await scrapePatientProfileById({ clinicName, patientId: id, logger, shouldStop });
+      patientResults.set(String(id), res);
+      return res;
+    } catch (error) {
+      logger?.error?.(`[profile] patient ${id} scrape threw: ${error.message}`);
+      patientResults.set(String(id), { patientId: id, profile_status: 'failed', error: error.message });
+      return null;
+    }
+  }
+
+  // First pass — go through everyone.
   for (const id of staffIds || []) {
-    if (shouldStop?.()) return { staff: staffResults, patients: patientResults };
-    if (onRateLimitCheck) await onRateLimitCheck();
-    try {
-      staffResults.push(await scrapeStaffProfileById({ clinicName, staffId: id, logger, shouldStop }));
-    } catch (error) {
-      logger?.error?.(`[profile] staff ${id} scrape failed: ${error.message}`);
-    }
+    if (shouldStop?.()) return { staff: [...staffResults.values()], patients: [...patientResults.values()] };
+    await scrapeStaff(id);
   }
-
   for (const id of patientIds || []) {
-    if (shouldStop?.()) return { staff: staffResults, patients: patientResults };
-    if (onRateLimitCheck) await onRateLimitCheck();
-    try {
-      patientResults.push(await scrapePatientProfileById({ clinicName, patientId: id, logger, shouldStop }));
-    } catch (error) {
-      logger?.error?.(`[profile] patient ${id} scrape failed: ${error.message}`);
+    if (shouldStop?.()) return { staff: [...staffResults.values()], patients: [...patientResults.values()] };
+    await scrapePatient(id);
+  }
+
+  // Retry passes — anything still marked "failed" gets another shot with a
+  // cooldown between passes so Jane's SPA has time to recover from whatever
+  // clustered timeout we hit the first time (typically server throttling).
+  for (let pass = 1; pass <= RETRY_PASSES; pass++) {
+    if (shouldStop?.()) break;
+    const failedStaff = [...staffResults.entries()]
+      .filter(([, r]) => r?.profile_status === 'failed')
+      .map(([id]) => id);
+    const failedPatients = [...patientResults.entries()]
+      .filter(([, r]) => r?.profile_status === 'failed')
+      .map(([id]) => id);
+    if (failedStaff.length === 0 && failedPatients.length === 0) {
+      logger?.info?.(`[profile] retry pass ${pass}: nothing pending, done`);
+      break;
+    }
+    logger?.warn?.(`[profile] retry pass ${pass}/${RETRY_PASSES}: ${failedStaff.length} staff + ${failedPatients.length} patients failed, cooling down ${RETRY_PASS_COOLDOWN_MS / 1000}s before retry`);
+    await sleep(RETRY_PASS_COOLDOWN_MS, { shouldStop });
+    if (shouldStop?.()) break;
+
+    for (const id of failedStaff) {
+      if (shouldStop?.()) break;
+      logger?.info?.(`[profile] retry pass ${pass} staff ${id}`);
+      await scrapeStaff(id);
+    }
+    for (const id of failedPatients) {
+      if (shouldStop?.()) break;
+      logger?.info?.(`[profile] retry pass ${pass} patient ${id}`);
+      await scrapePatient(id);
     }
   }
 
-  logger?.info?.(`[profile] PHASE 3 complete: ${staffResults.length} staff, ${patientResults.length} patients`);
-  return { staff: staffResults, patients: patientResults };
+  const stillFailedStaff = [...staffResults.values()].filter((r) => r?.profile_status === 'failed').length;
+  const stillFailedPatients = [...patientResults.values()].filter((r) => r?.profile_status === 'failed').length;
+  logger?.info?.(`[profile] PHASE 3 complete: ${staffResults.size} staff, ${patientResults.size} patients (still failed: ${stillFailedStaff} staff, ${stillFailedPatients} patients)`);
+  return { staff: [...staffResults.values()], patients: [...patientResults.values()] };
 }
