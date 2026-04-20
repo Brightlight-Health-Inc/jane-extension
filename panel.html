@@ -37,8 +37,8 @@
     .header p { font-size: 11px; opacity: 0.8; margin-top: 2px; }
     .content {
       flex: 1;
+      min-height: 0;
       padding: 16px;
-      overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -97,10 +97,19 @@
     .btn-row .btn { flex: 1; }
 
     /* Review table */
-    .review-wrap { display: none; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-    .review-wrap.visible { display: block; }
-    .review-header { padding: 10px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+    .review-wrap {
+      display: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      flex-direction: column;
+      max-height: 45vh;
+    }
+    .review-wrap.visible { display: flex; }
+    .review-header { padding: 10px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; flex: 0 0 auto; }
     .review-header strong { color: var(--text); }
+    #review-rows { flex: 1; overflow-y: auto; min-height: 0; }
     .review-row {
       display: grid;
       grid-template-columns: auto 1fr auto;
@@ -143,7 +152,8 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      min-height: 140px;
+      min-height: 160px;
+      flex: 1 1 auto;
     }
     .status-container.expanded { flex: 1; }
     .status-header { padding: 10px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
