@@ -14,7 +14,7 @@
  * an index alongside. patients.json and staff.json are always single-file.
  */
 
-import { listProfiles, listCharts } from '../storage/chart-db.js';
+import { listProfiles, listCharts, listConnections } from '../storage/chart-db.js';
 
 const MANIFEST_DIR = 'jane-scraper/_manifest';
 const CONNECTIONS_CHUNK_SIZE = 3000;
@@ -35,17 +35,22 @@ function buildStaffManifest(profiles) {
   }));
 }
 
-function buildConnectionsManifest(charts) {
-  return charts.map((c) => {
+function buildConnectionsManifest(connections, chartsById) {
+  // One row per (staff, chart) edge — a chart shared by N staff produces N
+  // rows. Download status comes from the deduped charts store (all staff on
+  // the same chart share the same downloaded PDF).
+  return connections.map((c) => {
+    const chart = chartsById.get(String(c.chart_id));
+    const status = chart?.status;
     const row = {
+      staff_id: c.staff_id,
       chart_id: c.chart_id,
+      patient_id: c.patient_id || null,
       chart_type: c.chart_type || null,
       chart_date: c.chart_date || null,
-      patient_id: c.patient_id ? String(c.patient_id) : null,
-      staff_id: c.staff_id ? String(c.staff_id) : null,
-      download_status: c.status === 'done' ? 'ok' : `failed_${c.failure_reason || c.status}`,
+      download_status: status === 'done' ? 'ok' : `failed_${chart?.failure_reason || status || 'unknown'}`,
     };
-    if (c.file_path) row.file_path = c.file_path;
+    if (chart?.file_path) row.file_path = chart.file_path;
     return row;
   });
 }
@@ -102,15 +107,17 @@ async function writeConnectionsManifest(connections) {
 }
 
 export async function writeAllManifests() {
-  const [patientProfiles, staffProfiles, charts] = await Promise.all([
+  const [patientProfiles, staffProfiles, charts, connectionEdges] = await Promise.all([
     listProfiles('patient'),
     listProfiles('staff'),
     listCharts(),
+    listConnections(),
   ]);
 
+  const chartsById = new Map(charts.map((c) => [String(c.chart_id), c]));
   const patients = buildPatientManifest(patientProfiles);
   const staff = buildStaffManifest(staffProfiles);
-  const connections = buildConnectionsManifest(charts);
+  const connections = buildConnectionsManifest(connectionEdges, chartsById);
 
   const patientsId = await downloadJson('patients.json', patients);
   const staffId = await downloadJson('staff.json', staff);

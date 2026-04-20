@@ -1,14 +1,19 @@
 /**
  * IndexedDB wrapper for the staff-first scraper.
  *
- * Two object stores:
- *   - charts:   keyPath "chart_id", index on "status" for queue operations.
- *               Fields: { chart_id, staff_id, staff_name, patient_id, patient_name,
- *                         chart_type, chart_date, chart_url, status,
- *                         claimed_by?, claimed_at?, file_path?, failure_reason? }
- *   - profiles: keyPath ["type","id"] for both staff and patient records.
- *               Fields: { type: "staff"|"patient", id, record, profile_status,
- *                         captured_at }
+ * Three object stores:
+ *   - charts:      keyPath "chart_id" — one record per unique chart, used as
+ *                  the download queue. If a chart appears in multiple staff's
+ *                  chart-entries lists (shared clinical note), `put` overwrites
+ *                  with the latest walker's metadata; that's fine because this
+ *                  store only drives the download — staff attribution is
+ *                  recorded separately in `connections`.
+ *                  Indexes: status, staff_id, patient_id.
+ *   - connections: keyPath ["staff_id","chart_id"] — every (staff, chart) edge
+ *                  the walker encountered, so a chart shared by N staff
+ *                  produces N records here. This is the source of truth for
+ *                  the connections manifest.
+ *   - profiles:    keyPath ["type","id"] for both staff and patient records.
  *
  * IndexedDB in MV3 service workers is scoped to the extension origin, so both
  * the coordinator and the manifest writer share one DB. Content scripts never
@@ -16,9 +21,10 @@
  */
 
 const DB_NAME = 'jane_scraper_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORES = {
   CHARTS: 'charts',
+  CONNECTIONS: 'connections',
   PROFILES: 'profiles',
 };
 
@@ -42,6 +48,12 @@ function openDb() {
         charts.createIndex('status', 'status', { unique: false });
         charts.createIndex('staff_id', 'staff_id', { unique: false });
         charts.createIndex('patient_id', 'patient_id', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORES.CONNECTIONS)) {
+        const connections = db.createObjectStore(STORES.CONNECTIONS, { keyPath: ['staff_id', 'chart_id'] });
+        connections.createIndex('staff_id', 'staff_id', { unique: false });
+        connections.createIndex('patient_id', 'patient_id', { unique: false });
+        connections.createIndex('chart_id', 'chart_id', { unique: false });
       }
       if (!db.objectStoreNames.contains(STORES.PROFILES)) {
         db.createObjectStore(STORES.PROFILES, { keyPath: ['type', 'id'] });
@@ -78,11 +90,53 @@ function reqAsPromise(req) {
 
 export async function addCharts(tuples) {
   if (!tuples || tuples.length === 0) return 0;
-  return runTx(STORES.CHARTS, 'readwrite', (store) => {
+  return openDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction([STORES.CHARTS, STORES.CONNECTIONS], 'readwrite');
+    const charts = tx.objectStore(STORES.CHARTS);
+    const connections = tx.objectStore(STORES.CONNECTIONS);
     for (const tuple of tuples) {
-      store.put({ ...tuple, status: tuple.status || STATUS.PENDING });
+      // charts: keyed on chart_id, so multiple walker hits for the same chart
+      // collapse to one row (download queue dedupe).
+      charts.put({ ...tuple, status: tuple.status || STATUS.PENDING });
+      // connections: keyed on [staff_id, chart_id], so every (staff, chart)
+      // edge is preserved even when a chart is shared between staff.
+      if (tuple.staff_id && tuple.chart_id) {
+        connections.put({
+          staff_id: String(tuple.staff_id),
+          chart_id: String(tuple.chart_id),
+          staff_name: tuple.staff_name || null,
+          patient_id: tuple.patient_id ? String(tuple.patient_id) : null,
+          patient_name: tuple.patient_name || null,
+          chart_type: tuple.chart_type || null,
+          chart_date: tuple.chart_date || null,
+          recorded_at: Date.now(),
+        });
+      }
     }
-    return tuples.length;
+    tx.oncomplete = () => resolve(tuples.length);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('transaction aborted'));
+  }));
+}
+
+export async function listConnections() {
+  return runTx(STORES.CONNECTIONS, 'readonly', (store) => new Promise((resolve, reject) => {
+    const out = [];
+    const cursorReq = store.openCursor();
+    cursorReq.onerror = () => reject(cursorReq.error);
+    cursorReq.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (!cursor) { resolve(out); return; }
+      out.push(cursor.value);
+      cursor.continue();
+    };
+  }));
+}
+
+export async function clearConnections() {
+  return runTx(STORES.CONNECTIONS, 'readwrite', (store) => {
+    store.clear();
+    return true;
   });
 }
 

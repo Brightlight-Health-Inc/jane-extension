@@ -22,6 +22,7 @@ import {
   recoverInFlight,
   countByStatus,
   clearCharts,
+  clearConnections,
   listCharts,
   listDistinctPatientIds,
   sweepStaleClaims,
@@ -118,6 +119,7 @@ export async function releaseChart(chartId) {
 export async function resetQueueForNewRun() {
   return serialize(async () => {
     await clearCharts();
+    await clearConnections();
     await chrome.storage.local.remove(PROGRESS_KEY);
     return refreshProgress();
   });
