@@ -302,8 +302,10 @@ chrome.runtime.onMessage.addListener((request) => {
   }
   if (request.action === 'phaseUpdate') {
     setPhase(request.phase, request);
-    if (request.phase === 'done') {
-      setUiState('done');
+    if (request.phase === 'done' || request.phase === 'stopped') {
+      reviewRows = [];
+      els.reviewRows.replaceChildren();
+      setUiState('form');
     }
     return;
   }
@@ -318,7 +320,8 @@ chrome.storage.onChanged.addListener((changes) => {
 (async function init() {
   const data = await chrome.storage.local.get(['runState', 'chartQueueProgress']);
   updateStats(data.chartQueueProgress);
-  if (data.runState && data.runState.phase && data.runState.phase !== 'idle' && data.runState.phase !== 'done') {
+  const terminalPhases = ['idle', 'done', 'stopped'];
+  if (data.runState && data.runState.phase && !terminalPhases.includes(data.runState.phase)) {
     setUiState('running');
     setPhase(data.runState.phase);
     logStatus(`Reconnected (phase: ${data.runState.phase})`, 'info');
