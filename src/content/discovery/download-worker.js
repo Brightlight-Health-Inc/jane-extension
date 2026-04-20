@@ -23,8 +23,9 @@ const RATE_LIMIT_BACKOFF_MS = 8000;
 // just wake everyone up simultaneously and re-trigger the limit.
 const SERVER_FAILED_BACKOFF_MS = 60000;
 // Random extra wait each worker adds so 4 workers don't burst Jane in sync
-// when the shared pause expires.
-const WAKE_JITTER_MAX_MS = 8000;
+// when the shared pause expires. Wider window = safer; the tradeoff is just
+// that the last worker takes longer to resume.
+const WAKE_JITTER_MAX_MS = 20000;
 const EMPTY_QUEUE_BACKOFF_MS = 4000;
 
 function buildChartPdfUrl(clinicName, patientId, chartId) {
