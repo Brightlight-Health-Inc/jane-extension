@@ -17,6 +17,10 @@ import { sleep } from '../../shared/utils/async-utils.js';
 import { cleanFilename } from '../../shared/utils/string-utils.js';
 
 const RATE_LIMIT_BACKOFF_MS = 8000;
+// SERVER_FAILED from Jane's download endpoint is usually a soft rate-limit
+// (server returns 5xx under load), not a permanently-broken chart. Pause all
+// workers longer than a normal rate-limit so the server has room to recover.
+const SERVER_FAILED_BACKOFF_MS = 30000;
 const EMPTY_QUEUE_BACKOFF_MS = 4000;
 
 function buildChartPdfUrl(clinicName, patientId, chartId) {
@@ -147,8 +151,20 @@ export async function runDownloadLoop({ threadId, clinicName, logger, shouldStop
 
       if (msg.includes('rate') || msg.includes('whoa there')) {
         logger?.warn?.(`[download] ${threadId} rate-limited, backing off ${RATE_LIMIT_BACKOFF_MS}ms`);
+        await chrome.storage.local.set({ rateLimitUntil: Date.now() + RATE_LIMIT_BACKOFF_MS });
         await sleep(RATE_LIMIT_BACKOFF_MS, { shouldStop });
         await reportChartResult('failChart', { chartId: tuple.chart_id, reason: 'rate_limit', retriable: true });
+        continue;
+      }
+
+      if (msg.includes('server_failed')) {
+        // Jane's download endpoint returns 5xx when overloaded by our burst.
+        // Raise the global gate so every worker pauses, not just this one —
+        // otherwise the siblings keep pushing and we never catch up.
+        logger?.warn?.(`[download] ${threadId} server overload (SERVER_FAILED), pausing all workers ${SERVER_FAILED_BACKOFF_MS}ms`);
+        await chrome.storage.local.set({ rateLimitUntil: Date.now() + SERVER_FAILED_BACKOFF_MS });
+        await sleep(SERVER_FAILED_BACKOFF_MS, { shouldStop });
+        await reportChartResult('failChart', { chartId: tuple.chart_id, reason: 'server_failed', retriable: true });
         continue;
       }
 
