@@ -19,6 +19,49 @@ import { listProfiles, listCharts, listConnections } from '../storage/chart-db.j
 
 const MANIFEST_DIR = 'jane-scraper/_manifest';
 const CONNECTIONS_CHUNK_SIZE = 3000;
+const CHART_ID_IN_FILENAME = /__(\d+)__/;
+
+/**
+ * Enumerate every PDF Chrome has on disk in jane-scraper/{patient}/ and
+ * group by patient_id. Returns:
+ *   { byPatient: Map<patientId, {folderName, files: [{filename, chartId?}]}>,
+ *     byChartId: Map<chartId, {filename, patientId}>,
+ *     total }
+ *
+ * chartId is parsed from the `__<id>__` segment of the filename that
+ * download-worker.js builds; null if the filename doesn't contain it.
+ */
+async function enumerateDiskPdfs() {
+  const downloads = await chrome.downloads.search({
+    filenameRegex: 'jane-scraper/\\d+_[^/]+/.*\\.pdf$',
+    exists: true,
+    limit: 0,
+  });
+
+  const byPatient = new Map();
+  const byChartId = new Map();
+
+  for (const dl of downloads || []) {
+    const match = dl.filename && dl.filename.match(/jane-scraper\/(\d+)_([^/]+)\/([^/]+\.pdf)$/);
+    if (!match) continue;
+    const patientId = match[1];
+    const folderName = match[2];
+    const filenameOnly = match[3];
+    const chartIdMatch = filenameOnly.match(CHART_ID_IN_FILENAME);
+    const chartId = chartIdMatch ? chartIdMatch[1] : null;
+
+    if (!byPatient.has(patientId)) {
+      byPatient.set(patientId, { folderName, files: [] });
+    }
+    byPatient.get(patientId).files.push({ filename: filenameOnly, chartId });
+
+    if (chartId && !byChartId.has(chartId)) {
+      byChartId.set(chartId, { filename: filenameOnly, patientId });
+    }
+  }
+
+  return { byPatient, byChartId, total: byChartId.size };
+}
 
 function buildPatientManifest(profiles) {
   return profiles.map((entry) => ({
@@ -36,7 +79,7 @@ function buildStaffManifest(profiles) {
   }));
 }
 
-function buildSummary({ charts, connections, patientProfiles, staffProfiles, chartsById, clinicName }) {
+function buildSummary({ charts, connections, patientProfiles, staffProfiles, chartsById, clinicName, disk }) {
   // Downloads
   const dlTotal = charts.length;
   const dlOk = charts.filter((c) => c.status === 'done').length;
@@ -150,6 +193,109 @@ function buildSummary({ charts, connections, patientProfiles, staffProfiles, cha
   const patientProfileCounts = profileCounts(patientProfiles);
   const staffProfileCounts = profileCounts(staffProfiles);
 
+  // Disk audit — cross-reference IndexedDB status against the actual files
+  // Chrome can see in the jane-scraper folders. Catches three kinds of drift:
+  //   - orphan_done: chart marked done in DB but file missing on disk
+  //     (e.g. user deleted the PDF, or completeChart fired but save failed)
+  //   - unknown_on_disk: file on disk with no matching chart in this run
+  //     (leftover from a previous run / unrelated download)
+  //   - missing_on_disk: chart not marked done (failed/pending/in_flight)
+  //     AND no file on disk — the true "needs re-download" set
+  const audit = { enabled: !!disk };
+  if (disk) {
+    const diskByChartId = disk.byChartId || new Map();
+    const diskByPatient = disk.byPatient || new Map();
+
+    const orphanDone = [];
+    const missingOnDisk = [];
+    const ghostFailed = [];
+    const matchedChartIds = new Set();
+
+    for (const chart of charts) {
+      const chartId = String(chart.chart_id);
+      const onDisk = diskByChartId.has(chartId);
+      if (onDisk) matchedChartIds.add(chartId);
+
+      const row = {
+        chart_id: chartId,
+        patient_id: chart.patient_id ? String(chart.patient_id) : null,
+        patient_name: chart.patient_name || null,
+        staff_id: chart.staff_id ? String(chart.staff_id) : null,
+        staff_name: chart.staff_name || null,
+        chart_type: chart.chart_type || null,
+        chart_date: chart.chart_date || null,
+        db_status: chart.status,
+        file_path: chart.file_path || (onDisk ? `jane-scraper/${chart.patient_id}_.../${diskByChartId.get(chartId).filename}` : null),
+      };
+
+      if (chart.status === 'done' && !onDisk) {
+        orphanDone.push({ ...row, failure_reason: 'file missing from disk despite done status' });
+      } else if (chart.status === 'failed' && !onDisk) {
+        missingOnDisk.push({ ...row, failure_reason: chart.failure_reason || 'unknown' });
+      } else if ((chart.status === 'pending' || chart.status === 'in_flight') && !onDisk) {
+        missingOnDisk.push({ ...row, failure_reason: `never_attempted: ${chart.status}` });
+      } else if (chart.status === 'failed' && onDisk) {
+        ghostFailed.push(row);
+      }
+    }
+
+    const extraFiles = [];
+    for (const [chartId, meta] of diskByChartId) {
+      if (!matchedChartIds.has(chartId)) {
+        extraFiles.push({ chart_id: chartId, patient_id: meta.patientId, filename: meta.filename });
+      }
+    }
+
+    // Concentration heuristic — if >50% of missing charts belong to one
+    // patient or one staff, surface that so the user can tell "systematic
+    // problem" vs "random noise".
+    const missByPatient = new Map();
+    const missByStaff = new Map();
+    for (const row of missingOnDisk) {
+      if (row.patient_id) missByPatient.set(row.patient_id, (missByPatient.get(row.patient_id) || 0) + 1);
+      if (row.staff_id) missByStaff.set(row.staff_id, (missByStaff.get(row.staff_id) || 0) + 1);
+    }
+    const hotspotOf = (map, totalFailed) => {
+      if (totalFailed === 0) return null;
+      let best = null;
+      for (const [key, count] of map) {
+        if (!best || count > best.count) best = { key, count };
+      }
+      if (!best) return null;
+      const ratio = best.count / totalFailed;
+      return ratio >= 0.5 ? { id: best.key, count: best.count, ratio_of_failures: Number(ratio.toFixed(2)) } : null;
+    };
+
+    // Count files per patient on disk (actual) vs expected from chart store
+    const expectedByPatient = new Map();
+    for (const chart of charts) {
+      const key = chart.patient_id ? String(chart.patient_id) : 'unknown';
+      expectedByPatient.set(key, (expectedByPatient.get(key) || 0) + 1);
+    }
+    const diskCountByPatient = [...diskByPatient.entries()]
+      .map(([pid, meta]) => ({
+        patient_id: pid,
+        folder_name: meta.folderName,
+        files_on_disk: meta.files.length,
+        charts_expected: expectedByPatient.get(pid) || 0,
+        gap: (expectedByPatient.get(pid) || 0) - meta.files.length,
+      }))
+      .sort((a, b) => b.files_on_disk - a.files_on_disk);
+
+    Object.assign(audit, {
+      files_on_disk_total: disk.total,
+      charts_in_queue: charts.length,
+      matched: matchedChartIds.size,
+      orphan_done: orphanDone,
+      missing_on_disk: missingOnDisk,
+      ghost_failed_but_on_disk: ghostFailed,
+      extra_files_on_disk: extraFiles,
+      hotspot_patient: hotspotOf(missByPatient, missingOnDisk.length),
+      hotspot_staff: hotspotOf(missByStaff, missingOnDisk.length),
+      per_patient_file_counts: diskCountByPatient,
+    });
+  }
+
   return {
     generated_at: new Date().toISOString(),
     clinic_name: clinicName || null,
@@ -176,6 +322,7 @@ function buildSummary({ charts, connections, patientProfiles, staffProfiles, cha
         ...partialOrFailed(staffProfiles, 'staff'),
       ],
     },
+    audit,
   };
 }
 
@@ -258,6 +405,13 @@ export async function writeAllManifests({ clinicName } = {}) {
     listConnections(),
   ]);
 
+  let disk = null;
+  try {
+    disk = await enumerateDiskPdfs();
+  } catch (error) {
+    console.warn('[manifest] disk audit skipped:', error.message);
+  }
+
   const chartsById = new Map(charts.map((c) => [String(c.chart_id), c]));
   const patients = buildPatientManifest(patientProfiles);
   const staff = buildStaffManifest(staffProfiles);
@@ -269,6 +423,7 @@ export async function writeAllManifests({ clinicName } = {}) {
     staffProfiles,
     chartsById,
     clinicName,
+    disk,
   });
 
   const patientsId = await downloadJson('patients.json', patients);

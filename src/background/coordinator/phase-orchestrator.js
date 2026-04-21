@@ -328,6 +328,60 @@ function logSummaryToPanel(summary) {
       notifyPanel(`  … and ${failed_charts.length - 10} more in summary.json`, 'warn');
     }
   }
+
+  const audit = summary.audit;
+  if (audit?.enabled) {
+    notifyPanel(`── Disk audit ──`, 'info');
+    const perfect = audit.orphan_done.length === 0
+      && audit.missing_on_disk.length === 0;
+    notifyPanel(
+      `On disk: ${audit.files_on_disk_total} PDFs · expected: ${audit.charts_in_queue} · matched: ${audit.matched}`,
+      perfect ? 'success' : 'warn',
+    );
+    if (audit.orphan_done.length > 0) {
+      notifyPanel(
+        `⚠ ${audit.orphan_done.length} chart(s) marked done but file missing from disk — these need re-download`,
+        'error',
+      );
+      for (const row of audit.orphan_done.slice(0, 5)) {
+        notifyPanel(`  chart=${row.chart_id} patient=${row.patient_name || row.patient_id}`, 'error');
+      }
+    }
+    if (audit.missing_on_disk.length > 0) {
+      notifyPanel(
+        `${audit.missing_on_disk.length} chart(s) missing from disk (failed or never attempted)`,
+        'warn',
+      );
+      if (audit.hotspot_patient) {
+        notifyPanel(
+          `  ${Math.round(audit.hotspot_patient.ratio_of_failures * 100)}% of missing charts belong to patient ${audit.hotspot_patient.id} — spot check that patient`,
+          'warn',
+        );
+      }
+      if (audit.hotspot_staff) {
+        notifyPanel(
+          `  ${Math.round(audit.hotspot_staff.ratio_of_failures * 100)}% of missing charts belong to staff ${audit.hotspot_staff.id} — spot check that staff`,
+          'warn',
+        );
+      }
+    }
+    if (audit.extra_files_on_disk.length > 0) {
+      notifyPanel(
+        `${audit.extra_files_on_disk.length} extra PDF(s) on disk from previous runs — won't hurt anything`,
+        'info',
+      );
+    }
+    if (audit.ghost_failed_but_on_disk.length > 0) {
+      notifyPanel(
+        `${audit.ghost_failed_but_on_disk.length} chart(s) marked failed but file is on disk — likely recovered on a prior run, safe to ignore`,
+        'info',
+      );
+    }
+    if (perfect) {
+      notifyPanel(`✓ Every expected chart has a matching PDF on disk.`, 'success');
+    }
+  }
+
   notifyPanel(`Full details: ~/Downloads/jane-scraper/_manifest/summary.json`, 'info');
 }
 
