@@ -275,12 +275,13 @@ export async function onWorkerFinishedDownload(threadId) {
 
 export async function onProfileComplete(payload) {
   return serialize(async () => {
-    const { runState } = await getState();
+    const { runState, runConfig } = await getState();
     if (runState.phase !== PHASES.PROFILE) return { ok: false };
     notifyPanel(`Profiles captured: ${payload?.patients || 0} patients, ${payload?.staff || 0} staff`, 'success');
     try {
-      const result = await writeAllManifests();
+      const result = await writeAllManifests({ clinicName: runConfig?.clinicName });
       notifyPanel(`Manifests written (${result.counts.connections} connections)`, 'success');
+      logSummaryToPanel(result.summary);
     } catch (error) {
       notifyPanel(`Manifest write failed: ${error.message}`, 'error');
     }
@@ -291,6 +292,43 @@ export async function onProfileComplete(payload) {
     notifyPanel('Export complete.', 'success');
     return { ok: true };
   });
+}
+
+function logSummaryToPanel(summary) {
+  if (!summary) return;
+  const { totals, downloads, profiles, failed_charts, per_staff } = summary;
+  notifyPanel(`── Run summary ──`, 'info');
+  notifyPanel(
+    `Downloads: ${downloads.ok}/${downloads.total} ok, ${downloads.failed} failed${downloads.not_yet_attempted ? `, ${downloads.not_yet_attempted} not attempted` : ''}`,
+    downloads.failed === 0 && downloads.not_yet_attempted === 0 ? 'success' : 'warn',
+  );
+  notifyPanel(
+    `Graph: ${totals.connections} edges across ${totals.unique_staff_involved} staff × ${totals.unique_patients} patients (${totals.unique_charts} unique charts)`,
+    'info',
+  );
+  notifyPanel(
+    `Profiles: patients ${profiles.patients.ok}/${profiles.patients.total} ok (${profiles.patients.partial} partial, ${profiles.patients.failed} failed) · staff ${profiles.staff.ok}/${profiles.staff.total} ok`,
+    profiles.patients.failed === 0 && profiles.staff.failed === 0 ? 'success' : 'warn',
+  );
+  for (const s of per_staff) {
+    notifyPanel(
+      `  ${s.staff_name || s.staff_id}: ${s.charts_ok}/${s.charts_total} ok${s.charts_failed ? `, ${s.charts_failed} failed` : ''} · ${s.unique_patients} patients`,
+      'info',
+    );
+  }
+  if (failed_charts.length > 0) {
+    notifyPanel(`Failed charts (${failed_charts.length}) — see summary.json for full list:`, 'warn');
+    for (const f of failed_charts.slice(0, 10)) {
+      notifyPanel(
+        `  chart=${f.chart_id} (${f.chart_type || 'Chart'}) patient=${f.patient_name || f.patient_id}: ${f.failure_reason}`,
+        'warn',
+      );
+    }
+    if (failed_charts.length > 10) {
+      notifyPanel(`  … and ${failed_charts.length - 10} more in summary.json`, 'warn');
+    }
+  }
+  notifyPanel(`Full details: ~/Downloads/jane-scraper/_manifest/summary.json`, 'info');
 }
 
 export async function stopExport() {
