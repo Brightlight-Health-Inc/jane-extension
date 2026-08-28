@@ -1,260 +1,117 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Jane Chart Assistant</title>
-  <style>
-    :root {
-      --bg: #f5f7fb;
-      --card: #ffffff;
-      --muted: #6b7280;
-      --text: #1f2937;
-      --brand: #354277;
-      --brand-600: #2b3563;
-      --accent: #2563eb;
-      --info: #2563eb;
-      --info-50: #eaf2ff;
-      --success: #16a34a;
-      --success-50: #e8f5e9;
-      --warn: #b45309;
-      --warn-50: #fef3c7;
-      --error: #dc2626;
-      --error-50: #ffebee;
-      --border: #e5e7eb;
-      --shadow: rgba(17, 24, 39, 0.06);
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-      background: var(--bg);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      color: var(--text);
-    }
-    .header { background: var(--brand); color: white; padding: 16px 20px; }
-    .header h1 { font-size: 16px; font-weight: 600; }
-    .header p { font-size: 11px; opacity: 0.8; margin-top: 2px; }
-    .content {
-      flex: 1;
-      min-height: 0;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      width: 100%;
-    }
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Brightlight Migrator</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #14181f;
+        --muted: #5b6572;
+        --line: #e3e7ec;
+        --accent: #0f8b8d;
+        --ok: #147d55;
+        --warn: #9a5b00;
+        --err: #b3261e;
+        --panel: #f6f8fa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14181f;
+          --fg: #e8ecf1;
+          --muted: #9aa5b1;
+          --line: #2a313b;
+          --accent: #2bb3b5;
+          --ok: #4cc38a;
+          --warn: #e0a34a;
+          --err: #f2726b;
+          --panel: #1b212a;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 18px;
+        font: 13px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      h1 { font-size: 15px; margin: 0 0 2px; }
+      .sub { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+      .row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 12px; }
+      .row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+      .muted { color: var(--muted); font-weight: 400 !important; }
+      .ok { color: var(--ok); }
+      .warn { color: var(--warn); }
+      .err { color: var(--err); }
+      .status { font-size: 12px; min-height: 20px; margin-bottom: 10px; }
+      .dot {
+        display: inline-block; width: 7px; height: 7px; border-radius: 999px;
+        background: var(--muted); margin-right: 6px; vertical-align: middle;
+      }
+      .dot.live { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+      .dot.ok { background: var(--ok); }
+      .dot.err { background: var(--err); }
+      @keyframes pulse { 0%,100% {opacity:1} 50% {opacity:.35} }
+      ol { padding-left: 18px; margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+      li { margin: 4px 0; }
+      hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+      .hint { font-size: 11px; color: var(--muted); }
+      code {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 11px; background: var(--panel); padding: 1px 5px; border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Brightlight Migrator</h1>
+    <div class="sub">Copies this clinic's own Jane records into Brightlight Health.</div>
 
-    .stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
-    .stat { background: var(--card); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); }
-    .stat .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
-    .stat .value { font-size: 16px; font-weight: 700; margin-top: 2px; color: var(--text); }
+    <div class="status" id="status"><span class="dot" id="dot"></span><span id="statusText">Idle</span></div>
 
-    .phase-strip {
-      display: none;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 12px;
-    }
-    .phase-strip.visible { display: block; }
-    .phase-strip .phase-label { font-weight: 600; color: var(--brand); }
-    .phase-strip .phase-detail { color: var(--muted); margin-top: 4px; }
-
-    .form-group { display: flex; flex-direction: column; gap: 4px; }
-    .form-group label { font-size: 12px; font-weight: 600; color: var(--text); }
-    .form-group input, .form-group textarea {
-      width: 100%; padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px; font-size: 13px;
-      font-family: inherit;
-    }
-    .form-group textarea { min-height: 120px; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-    .form-group input:focus, .form-group textarea:focus {
-      outline: none; border-color: var(--accent);
-    }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-
-    .btn {
-      padding: 10px 12px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .btn-primary { background: var(--brand); color: white; }
-    .btn-primary:hover { background: var(--brand-600); }
-    .btn-primary:disabled { background: #cbd5e1; cursor: not-allowed; }
-    .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
-    .btn-secondary:hover { background: #f9fafb; }
-    .btn-danger { background: var(--error); color: white; }
-    .btn-danger:hover { background: #b91c1c; }
-
-    .btn-row { display: flex; gap: 8px; }
-    .btn-row .btn { flex: 1; }
-
-    /* Review table */
-    .review-wrap {
-      display: none;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-      flex-direction: column;
-      max-height: 45vh;
-    }
-    .review-wrap.visible { display: flex; }
-    .review-header { padding: 10px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; flex: 0 0 auto; }
-    .review-header strong { color: var(--text); }
-    #review-rows { flex: 1; overflow-y: auto; min-height: 0; }
-    .review-row {
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border);
-      font-size: 12px;
-    }
-    .review-row:last-child { border-bottom: none; }
-    .review-row .badge {
-      width: 22px; height: 22px; border-radius: 50%;
-      display: inline-flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 700;
-    }
-    .badge-ok { background: var(--success-50); color: var(--success); }
-    .badge-warn { background: var(--warn-50); color: var(--warn); }
-    .badge-err { background: var(--error-50); color: var(--error); }
-    .review-name { display: flex; flex-direction: column; }
-    .review-name .input-name { font-weight: 600; }
-    .review-name .matched-name { color: var(--muted); font-size: 11px; margin-top: 2px; }
-    .review-row select {
-      font-size: 12px;
-      padding: 4px 6px;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      background: white;
-      max-width: 180px;
-    }
-    .review-row .row-action {
-      font-size: 11px; color: var(--error); background: none; border: none; cursor: pointer; padding: 4px 8px;
-    }
-    .review-row .row-action:hover { text-decoration: underline; }
-
-    /* Status log */
-    .status-container {
-      background: var(--card);
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      min-height: 160px;
-      flex: 1 1 auto;
-    }
-    .status-container.expanded { flex: 1; }
-    .status-header { padding: 10px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-    .status-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
-    .status-count { font-size: 11px; color: var(--muted); background: white; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); }
-    .status-messages {
-      flex: 1; overflow-y: auto; padding: 10px;
-      display: flex; flex-direction: column; gap: 6px;
-    }
-    .status-message {
-      font-size: 12px;
-      line-height: 1.4;
-      padding: 8px 10px;
-      background: #f9fafb;
-      border-radius: 6px;
-      border-left: 3px solid var(--info);
-      font-family: ui-monospace, Menlo, monospace;
-    }
-    .status-message.error { border-left-color: var(--error); background: var(--error-50); color: #7f1d1d; }
-    .status-message.success { border-left-color: var(--success); background: var(--success-50); color: #14532d; }
-    .status-message.warn { border-left-color: var(--warn); background: var(--warn-50); color: #7c2d12; }
-    .status-message .timestamp { font-size: 10px; color: var(--muted); margin-right: 6px; }
-
-    .hidden { display: none !important; }
-
-    .hint {
-      font-size: 11px; color: var(--muted); line-height: 1.4;
-      background: #fafbfc; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>Jane Chart Assistant</h1>
-    <p>Staff-first chart export</p>
-  </div>
-
-  <div class="content">
-    <div class="stats-grid" id="stats-grid">
-      <div class="stat"><div class="label">Queued</div><div class="value" id="stat-queued">0</div></div>
-      <div class="stat"><div class="label">Downloaded</div><div class="value" id="stat-done">0</div></div>
-      <div class="stat"><div class="label">Failed</div><div class="value" id="stat-failed">0</div></div>
+    <div class="card" id="idleCard">
+      <strong style="font-size:12px">Nothing to do here</strong>
+      <ol>
+        <li>Sign in to Jane in this browser.</li>
+        <li>In Brightlight, open <strong>Migrations</strong> and start a run.</li>
+      </ol>
+      <p class="hint" style="margin-top:10px">
+        This window has no settings on purpose — every choice is made in Brightlight,
+        so there is only ever one answer to each question.
+      </p>
     </div>
 
-    <div class="phase-strip" id="phase-strip">
-      <div class="phase-label" id="phase-label">Idle</div>
-      <div class="phase-detail" id="phase-detail"></div>
+    <div class="card" id="runCard" style="display:none">
+      <div class="row"><span class="muted">Clinic</span><span id="runClinic">—</span></div>
+      <div class="row"><span class="muted">Run</span><span id="runId">—</span></div>
     </div>
 
-    <div id="form-section">
-      <div class="form-group">
-        <label for="clinic-name">Clinic Name</label>
-        <input type="text" id="clinic-name" placeholder="e.g., bedfordskinclinic">
-      </div>
-      <div class="form-row" style="margin-top: 8px;">
-        <div class="form-group">
-          <label for="email">Email</label>
-          <input type="email" id="email" placeholder="you@clinic.com">
-        </div>
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input type="password" id="password" placeholder="password">
-        </div>
-      </div>
-      <div class="form-group" style="margin-top: 8px;">
-        <label for="thread-count">Threads (1-8)</label>
-        <input type="number" id="thread-count" min="1" max="8" value="4">
-      </div>
-      <div class="form-group" style="margin-top: 8px;">
-        <label for="staff-names">Staff Names (one per line)</label>
-        <textarea id="staff-names" placeholder="Paste staff names here, one per line. Honorifics like Dr./Mrs. are fine.&#10;&#10;Farhat Shabbir&#10;Dr. Kimberly Mach&#10;Emma Smith"></textarea>
-      </div>
-      <button id="resolve-btn" class="btn btn-primary" style="margin-top: 10px; width: 100%;">Resolve Staff</button>
-      <div class="hint" style="margin-top: 8px;">
-        Resolving logs into Jane once in a background tab and searches each name. You'll review matches before any charts are downloaded.
-      </div>
+    <div class="card" id="counts" style="display:none">
+      <div class="row"><span class="muted">Staff</span><span id="c-staff_member">0</span></div>
+      <div class="row"><span class="muted">Services</span><span id="c-treatment">0</span></div>
+      <div class="row"><span class="muted">Locations</span><span id="c-location">0</span></div>
+      <div class="row"><span class="muted">Patients</span><span id="c-patient">0</span></div>
+      <div class="row"><span class="muted">Appointments</span><span id="c-appointment">0</span></div>
+      <div class="row"><span class="muted">Chart entries</span><span id="c-chart_entry">0</span></div>
+      <div class="row"><span class="muted">Files</span><span id="c-file">0</span></div>
+      <div class="row"><span class="muted">Files copied</span><span id="c-file_blob">0</span></div>
     </div>
 
-    <div class="review-wrap" id="review-wrap">
-      <div class="review-header">
-        <span><strong id="review-resolved-count">0</strong> resolved / <span id="review-total-count">0</span> total</span>
-        <span id="review-summary"></span>
-      </div>
-      <div id="review-rows"></div>
-      <div style="padding: 10px 12px; border-top: 1px solid var(--border);" class="btn-row">
-        <button id="back-btn" class="btn btn-secondary">Back to edit</button>
-        <button id="start-btn" class="btn btn-primary" disabled>Start Export</button>
-      </div>
-    </div>
+    <hr />
+    <p class="hint">
+      Your Jane password is never entered here and never leaves your browser.
+      Keep this window open while a copy runs — you can keep using other tabs.
+    </p>
+    <p class="hint" style="margin-top:8px">Version <span id="version">—</span></p>
 
-    <button id="stop-btn" class="btn btn-danger hidden">Stop Export</button>
-
-    <div class="status-container">
-      <div class="status-header">
-        <div class="status-label">Log</div>
-        <div class="status-count" id="status-count">0 messages</div>
-      </div>
-      <div class="status-messages" id="status-messages"></div>
-    </div>
-  </div>
-
-  <script src="panel.js"></script>
-</body>
+    <script src="panel.js"></script>
+  </body>
 </html>

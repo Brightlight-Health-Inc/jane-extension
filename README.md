@@ -1,76 +1,159 @@
-# Jane Chart Assistant
+# Brightlight Migrator
 
-Chrome extension for healthcare professionals to efficiently export and organize patient chart PDFs from Jane App for record keeping and compliance purposes.
+Copies a clinic's own records out of Jane and into Brightlight Health.
 
-## Overview
+This replaced the "Jane Chart Assistant" that used to live here (removed
+2026-08-27, recoverable from git history). Both had the same purpose; the
+difference is worth stating:
 
-Jane Chart Assistant streamlines the process of downloading patient charts from Jane App. Instead of manually clicking through each patient's charts one by one, this tool helps you export multiple charts in bulk, saving time on administrative tasks.
+| | Chart Assistant (removed) | Migrator (this) |
+|---|---|---|
+| How it reads Jane | drives the UI, scrapes the DOM | calls Jane's own JSON API |
+| What it gets | printed PDFs of charts | the structured chart — ticked boxes, scale scores, vitals, signature strokes |
+| Speed | one PDF per 4 seconds | ~50 ms per record |
+| Files on disk | thousands of PDFs in `~/Downloads` | none |
+| Breaks when | Jane changes any CSS class | Jane changes an API route (fixed server-side, no re-install) |
+| Size | ~30 files of scraping logic | 3 files, no Jane knowledge compiled in |
 
-**Privacy First**: No data is collected or transmitted. All operations occur locally on your device. See [Privacy Policy](PRIVACY_POLICY.md) for details.
+## How it works
 
-## Installation
+```
+Jane tab (the clinic's own session)          Brightlight
+┌──────────────────────────────┐            ┌──────────────────────┐
+│ content.js                   │            │                      │
+│   fetch(Jane API)  ──────────┼── data ───▶│ service worker ──────┼──▶ /migration/jane/...
+│   (same-origin: the session  │            │ (holds the run key)  │
+│    cookie works, and is      │            │                      │
+│    never read or copied)     │            └──────────────────────┘
+└──────────────────────────────┘
+```
 
-### Manual Installation (Developer Mode)
-1. Download or clone this repository
-2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable **Developer mode** (toggle in top right)
-4. Click **Load unpacked**
-5. Select the extension folder
+Two deliberate splits:
 
-## Usage
+- **The content script reads Jane; it never learns the Brightlight run key.**
+  It runs in the page's origin so Jane's `SameSite` session cookie is sent
+  automatically — which also means the cookie is never read, copied or
+  transmitted by us.
+- **The service worker posts to Brightlight; it never sees Jane's cookie.**
+  It also has to be the one to post: Chrome blocks an HTTPS page from making
+  requests to a plain-HTTP server, and extension requests are not subject to that.
 
-1. Click the extension icon to open the Chart Assistant panel
-2. Enter your Jane App credentials:
-   - Clinic name (e.g., `yourClinicName` from `yourClinicName.janeapp.com`)
-   - Email address
-   - Password
-   - Number of concurrent export threads (1-8)
-3. Click **Start Export**
-4. The assistant will:
-   - Log into your Jane App account
-   - Navigate through patient records
-   - Download chart PDFs for each patient
-   - Organize files into patient-specific folders
-   - Continue until all patients are processed
+The extension contains **no knowledge of Jane's endpoints**. It downloads an
+extraction plan from Brightlight at the start of every run
+(`GET /migration/jane/extraction-plan`), so a change to Jane's API ships as a
+server deploy rather than as a re-install in every clinic.
 
-## Download Location
+## Installing it
 
-All files are saved to: `Downloads/jane-scraper/`
+**One machine.** Download `brightlight-migrator.zip` from
+`https://<your-clinic>.brightlight.ai/extension/brightlight-migrator.zip`, unzip
+it somewhere permanent, then `chrome://extensions` → **Developer mode** →
+**Load unpacked** → select the unzipped folder. Chrome loads it from that folder
+on every start, so moving or deleting the folder uninstalls it.
 
-Each patient gets their own folder: `PatientID_PatientName/` containing all their chart PDFs.
+**A managed fleet.** Install by policy instead — no developer mode, and updates
+arrive on their own:
 
-## Features
+```
+HKLM\Software\Policies\Google\Chrome\ExtensionInstallForcelist
+  1 = lpbddgbgkjaijdaghgamppndakohciii;https://clinic.brightlight.ai/extension/update.xml
+HKLM\Software\Policies\Google\Chrome\ExtensionInstallAllowlist
+  1 = lpbddgbgkjaijdaghgamppndakohciii
+```
 
-- Bulk chart export
-- Multi-threaded processing for faster exports
-- Automatic resume if interrupted
-- Skip patients with no charts automatically
-- Organized folder structure by patient
-- Real-time progress tracking
-- Stop/resume capability
+A bare `.crx` cannot be installed by double-clicking or dragging it in — Chrome
+has refused that for years. The signed `.crx` exists for the policy route above,
+which fetches it itself.
 
-## Privacy & Security
+## Releasing
 
-- Zero data collection - no analytics, no telemetry
-- Local storage only - credentials never leave your device
-- No external servers - communicates only with Jane App
-- You control your data - all files saved locally
-- See full [Privacy Policy](PRIVACY_POLICY.md)
+```
+node build.mjs                                   # dist/
+node build.mjs --out ../blhClinicApp/public/extension   # what actually ships
+```
 
-## Compliance
+The build has no dependencies and is **deterministic**: same commit in, same
+bytes out. `SHA256SUMS.txt` records the digests, so "the clinic is running
+exactly what we shipped" is checkable rather than assumed.
 
-This tool is designed to assist healthcare professionals with:
-- Record keeping and archival requirements
-- Compliance documentation
-- Practice transition support
-- Backup and disaster recovery
+Bump `version` in `manifest.json` first. Everything under `public/extension/` is
+served by the clinic app's normal deploy; the versioned `.crx` and `.zip` are
+immutable, while `update.xml` and the unversioned `.zip` are stable pointers and
+get a short cache (see `deploy-frontend.yml`).
 
-**Your Responsibility**: Users must ensure compliance with HIPAA, local regulations, and their organization's data handling policies.
+### The signing key
 
-## Support
+`~/.claude/keys/brightlight-migrator.pem`, **outside this repository**, and it
+belongs in the password manager.
 
-For issues, questions, or feature requests, please open an issue on GitHub.
+The extension's ID — `lpbddgbgkjaijdaghgamppndakohciii` — is derived from the
+matching public key, which is pinned in `manifest.json`. That ID is not a
+cosmetic detail: `externally_connectable` and `EXTENSION_ID` in the clinic app
+both name it, and updates only replace an install if the ID matches. **Signing
+with a different key changes the ID**, which silently breaks the app's ability to
+talk to the extension and turns every update into a second copy installed beside
+the first. The build refuses to run if the pinned key and the signing key
+disagree.
 
-## License
+## Use
 
-Copyright © 2025. All rights reserved.
+1. Sign in to Jane in the same browser.
+2. In Brightlight: **Migrations**. Save your Jane address and confirm the
+   extension is detected — once per clinic.
+3. Choose what to copy and press **Start the copy**.
+
+That is the whole operator flow. The extension opens Jane itself, and progress
+appears in Brightlight. There is nothing to paste and nothing to configure here —
+its side panel is a status window with no controls, because a second place to
+answer the same question is a second answer, and one of them wins for reasons
+nobody can see.
+
+Full operator guide: `/guides/jane-migration.html` in the Brightlight app.
+
+## The run key
+
+It is not your Brightlight session, and no person ever sees it. The page mints it
+and hands it to the extension over `externally_connectable` in the same breath.
+
+It is scoped to one import run, expires the same day, and can do exactly two
+things: fetch the extraction plan and push records into that run. It cannot start
+runs, read patient data back, or trigger a load. That is verified by tests on the
+server side.
+
+## Files
+
+- `manifest.json` — MV3. Pins the public key, so the ID is stable. Requires
+  access to `janeapp.com` (see below) and names the Brightlight origins allowed
+  to talk to it.
+- `build.mjs` — packages and signs. No dependencies.
+- `panel.html` / `panel.js` — a status window. No controls, on purpose.
+- `src/background.js` — service worker. Talks to Brightlight, retries transient
+  upload failures, holds the run key in `storage.session` (memory only).
+- `src/content.js` — the pump. Executes the server's plan against Jane.
+
+## Permissions
+
+`https://*.janeapp.com/*` is a **required** host permission, granted once at
+install.
+
+It was optional at first, requested at the moment it was needed. That cannot
+work: `chrome.permissions.request()` is only allowed during a user gesture in an
+extension surface, and the message that starts a run arrives from a web page with
+no gesture attached — the request throws and the copy dies before reading
+anything. Declaring it up front is also the more honest of the two. An extension
+whose entire purpose is reading Jane should say so on the install prompt rather
+than slip the question in later.
+
+Which Jane account gets read is still narrow, and is decided by Brightlight: the
+worker opens the host stored on the organization and refuses to continue if that
+tab turns out to be signed in to a different clinic.
+
+## Privacy
+
+- No analytics, no telemetry, no third-party requests.
+- The Jane session cookie is never read, stored or transmitted. The extension
+  does not hold the `cookies` permission at all.
+- The run key lives in `chrome.storage.session`, which is memory-only and cleared
+  when the browser closes.
+- Patient data passes through the extension only in transit, from the clinic's
+  Jane account to the clinic's own Brightlight tenant.

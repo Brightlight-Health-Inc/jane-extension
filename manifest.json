@@ -1,57 +1,37 @@
 {
   "manifest_version": 3,
-  "name": "Jane Chart Assistant",
-  "version": "1.0.0",
-  "description": "Download and organize patient charts from Jane App for record keeping and compliance",
-  "homepage_url": "https://github.com/Brightlight-Health-Inc/jane-extension",
+  "name": "Brightlight Migrator",
+  "version": "2.0.0",
+  "description": "Copies a clinic's own Jane records into Brightlight Health. Driven from Brightlight; nothing is configured here.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAttChYsM+4oQfbPih4caVAJ2YvwfToDZq1b2hLiqa2Rt2vHnsNvTcHqZitm9+iJOY6ADyF8LeJcylayiKfvN6nH9HUSMCFbx8ESATjc6ddSQO9X6I80kR9KGMPwryW1seR3OvNbZgHJYkgzh1e89Tc1Tv9+xJCRVS87djeygQXGPR79W/MFfT+VgmiabstVUjwqiDmo0h06dOkSO+ZpRs0ckB6Cg0H74U9XNKKckzLp5Ne4ffJYtz2/tA5n/SSUpHjWwPZGfvX6I4FAW1FVlvosdrP7dn7G13dAx5xrfCk//xnIhiyJDclLth1kx0+U87W6FYQBPyc5ZRW4HeN/WyTwIDAQAB",
   "icons": {
     "16": "16.png",
     "48": "48.png",
     "128": "128.png"
   },
   "permissions": [
-    "sidePanel",
-    "activeTab",
     "scripting",
     "tabs",
     "storage",
-    "downloads"
+    "sidePanel"
   ],
-  "optional_host_permissions": [
+  "host_permissions": [
     "https://*.janeapp.com/*"
   ],
+  "externally_connectable": {
+    "matches": [
+      "https://*.brightlight.ai/*",
+      "http://localhost/*"
+    ]
+  },
   "side_panel": {
     "default_path": "panel.html"
   },
   "action": {
-    "default_title": "Open Chart Assistant"
+    "default_title": "Brightlight Migrator"
   },
   "background": {
-    "service_worker": "src/background/background-main.js",
+    "service_worker": "src/background.js",
     "type": "module"
-  },
-  "content_scripts": [
-    {
-      "matches": ["https://*.janeapp.com/*"],
-      "js": ["src/content/content-main.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "src/shared/*.js",
-        "src/shared/utils/*.js",
-        "src/content/state/*.js",
-        "src/content/auth/*.js",
-        "src/content/navigation/*.js",
-        "src/content/scraping/*.js",
-        "src/content/scraping/extractors/*.js",
-        "src/content/download/*.js",
-        "src/content/recovery/*.js",
-        "src/content/discovery/*.js"
-      ],
-      "matches": ["https://*.janeapp.com/*"]
-    }
-  ]
+  }
 }

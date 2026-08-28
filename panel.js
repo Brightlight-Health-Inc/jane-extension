@@ -1,374 +1,118 @@
-/**
- * Side panel controller for the staff-first export.
- *
- * UI states:
- *   - form      : user is entering credentials + staff names
- *   - resolving : preflight in flight, waiting for review rows
- *   - review    : review table rendered, user confirming matches
- *   - running   : discovery/download/profile in progress
- *   - done      : final state, offer to start a new run
- */
+// Side panel: a window, not a control room.
+//
+// There is deliberately nothing to configure here. Every decision — what to
+// copy, how far back, which records match, whether to write anything — is made
+// in Brightlight, because a second place to answer the same question is a second
+// answer, and one of them wins for reasons nobody can see.
+//
+// So this shows two things: whether a copy is running, and how it is going.
 
-const MAX_THREADS = 8;
-const MAX_LOG_ENTRIES = 500;
+const $ = (id) => document.getElementById(id);
 
-const els = {
-  formSection: document.getElementById('form-section'),
-  clinicName: document.getElementById('clinic-name'),
-  email: document.getElementById('email'),
-  password: document.getElementById('password'),
-  threadCount: document.getElementById('thread-count'),
-  staffNames: document.getElementById('staff-names'),
-  resolveBtn: document.getElementById('resolve-btn'),
-
-  reviewWrap: document.getElementById('review-wrap'),
-  reviewRows: document.getElementById('review-rows'),
-  reviewResolvedCount: document.getElementById('review-resolved-count'),
-  reviewTotalCount: document.getElementById('review-total-count'),
-  reviewSummary: document.getElementById('review-summary'),
-  backBtn: document.getElementById('back-btn'),
-  startBtn: document.getElementById('start-btn'),
-
-  stopBtn: document.getElementById('stop-btn'),
-
-  phaseStrip: document.getElementById('phase-strip'),
-  phaseLabel: document.getElementById('phase-label'),
-  phaseDetail: document.getElementById('phase-detail'),
-
-  statQueued: document.getElementById('stat-queued'),
-  statDone: document.getElementById('stat-done'),
-  statFailed: document.getElementById('stat-failed'),
-
-  statusMessages: document.getElementById('status-messages'),
-  statusCount: document.getElementById('status-count'),
-};
-
-let reviewRows = [];
-let messageCount = 0;
-let autoConfirmPending = false;
-
-function logStatus(message, type = 'info') {
-  const msg = document.createElement('div');
-  msg.className = `status-message ${type}`;
-  const ts = document.createElement('span');
-  ts.className = 'timestamp';
-  ts.textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
-  const text = document.createTextNode(String(message));
-  msg.append(ts, text);
-  els.statusMessages.appendChild(msg);
-  while (els.statusMessages.children.length > MAX_LOG_ENTRIES) {
-    els.statusMessages.removeChild(els.statusMessages.firstElementChild);
-  }
-  messageCount += 1;
-  els.statusCount.textContent = `${messageCount} message${messageCount === 1 ? '' : 's'}`;
-  const nearBottom = els.statusMessages.scrollHeight - els.statusMessages.scrollTop <= els.statusMessages.clientHeight + 50;
-  if (nearBottom) els.statusMessages.scrollTop = els.statusMessages.scrollHeight;
+function setStatus(text, kind = "") {
+  $("statusText").textContent = text;
+  $("statusText").className = kind;
+  $("dot").className = `dot ${kind === "err" ? "err" : kind === "ok" ? "ok" : "live"}`;
 }
 
-function setUiState(state) {
-  const running = state === 'running' || state === 'done';
-  const inProgress = state === 'resolving' || state === 'review' || state === 'running';
-  els.formSection.classList.toggle('hidden', state !== 'form');
-  els.reviewWrap.classList.toggle('visible', state === 'review');
-  els.stopBtn.classList.toggle('hidden', !inProgress);
-  els.phaseStrip.classList.toggle('visible', running);
-  if (state === 'resolving') els.resolveBtn.disabled = true;
-  if (state === 'form') els.resolveBtn.disabled = false;
+function setIdle(text = "Idle") {
+  $("statusText").textContent = text;
+  $("statusText").className = "muted";
+  $("dot").className = "dot";
+  $("idleCard").style.display = "block";
+  $("runCard").style.display = "none";
 }
 
-function setPhase(phase, extras = {}) {
-  const labels = {
-    idle: 'Idle',
-    preflight: 'Pre-flight (resolving staff names)',
-    discovery: 'Phase 1 · Discovery',
-    download: 'Phase 2 · Download',
-    profile: 'Phase 3 · Profiles',
-    done: 'Done',
-    stopped: 'Stopped',
-  };
-  els.phaseLabel.textContent = labels[phase] || phase;
-  const bits = [];
-  if (extras.staffCompleted != null && extras.totalStaff != null) {
-    bits.push(`${extras.staffCompleted}/${extras.totalStaff} staff`);
-  }
-  if (extras.tuplesFound != null) bits.push(`${extras.tuplesFound} charts found`);
-  if (extras.totalTuples != null) bits.push(`${extras.totalTuples} charts queued`);
-  els.phaseDetail.textContent = bits.join(' · ');
+function setRunning(run) {
+  $("idleCard").style.display = "none";
+  $("runCard").style.display = "block";
+  $("counts").style.display = "block";
+  if (run?.janeHost) $("runClinic").textContent = run.janeHost.replace(".janeapp.com", "");
+  if (run?.importRunId) $("runId").textContent = `${run.importRunId.slice(0, 8)}…`;
 }
 
-function updateStats(progress) {
-  if (!progress) return;
-  const queued = (progress.pending || 0) + (progress.in_flight || 0);
-  els.statQueued.textContent = String(queued);
-  els.statDone.textContent = String(progress.done || 0);
-  els.statFailed.textContent = String(progress.failed || 0);
-}
-
-async function ensureClinicPermission(clinicName) {
-  const origin = `https://${clinicName}.janeapp.com/*`;
-  try {
-    const has = await chrome.permissions.contains({ origins: [origin] });
-    if (has) return true;
-    return await chrome.permissions.request({ origins: [origin] });
-  } catch (error) {
-    logStatus(`Permission check failed: ${error.message}`, 'error');
-    return false;
+function renderCounts(counts) {
+  $("counts").style.display = "block";
+  for (const [entity, value] of Object.entries(counts || {})) {
+    const node = $(`c-${entity}`);
+    if (node) node.textContent = String(value);
   }
 }
 
-els.resolveBtn.addEventListener('click', async () => {
-  const clinicName = els.clinicName.value.trim();
-  const email = els.email.value.trim();
-  const password = els.password.value;
-  const numThreads = parseInt(els.threadCount.value, 10);
-  const staffNames = els.staffNames.value;
+// The same wording the Brightlight page shows, so an operator glancing at either
+// sees the same sentence rather than two vocabularies for one event.
+function describeProgress(payload) {
+  switch (payload?.type) {
+    case "reference":
+      return `Reading ${payload.key.replace(/_/g, " ")} — ${payload.count}`;
+    case "calendar":
+      return payload.finished
+        ? `Schedule read — ${payload.found} appointments`
+        : `Reading the schedule — ${payload.year} (${payload.found} so far)`;
+    case "patients":
+      if (payload.cappedAt) return `Stopped at ${payload.found} patients (trial run)`;
+      return payload.done
+        ? `Found ${payload.found} patients`
+        : `Scanning patients — ${payload.found} found`;
+    case "perPatient":
+      return `${payload.key === "files" ? "Files" : "Charts"} — patient ${payload.done} of ${payload.total}`;
+    case "appointments":
+      return `Appointment details — ${payload.done} of ${payload.total}`;
+    case "files":
+      return `Copying files — ${payload.done} of ${payload.total}`;
+    case "throttled":
+      return `Jane asked us to slow down; waiting ${Math.round(payload.waitMs / 1000)}s…`;
+    default:
+      return "";
+  }
+}
 
-  if (!clinicName || !email || !password) {
-    logStatus('Fill in clinic, email, password', 'error');
+chrome.runtime.onMessage.addListener((message) => {
+  if (!message?.__toPanel) return;
+
+  if (message.kind === "phase") {
+    setRunning(null);
+    setStatus(message.message);
     return;
   }
-  if (!Number.isInteger(numThreads) || numThreads < 1 || numThreads > MAX_THREADS) {
-    logStatus(`Thread count must be 1..${MAX_THREADS}`, 'error');
-    return;
-  }
-
-  autoConfirmPending = !staffNames.trim();
-  if (autoConfirmPending) {
-    logStatus('No names provided — will process all staff in directory', 'info');
-  }
-
-  const permitted = await ensureClinicPermission(clinicName);
-  if (!permitted) {
-    logStatus(`Permission required for ${clinicName}.janeapp.com`, 'error');
-    return;
-  }
-
-  setUiState('resolving');
-  logStatus('Starting pre-flight resolution…', 'info');
-
-  chrome.runtime.sendMessage({
-    action: 'startStaffExport',
-    clinicName, email, password, numThreads, staffNames,
-  }, (response) => {
-    if (chrome.runtime.lastError) {
-      logStatus(`startStaffExport failed: ${chrome.runtime.lastError.message}`, 'error');
-      setUiState('form');
-      return;
+  if (message.kind === "progress") {
+    const text = describeProgress(message.payload);
+    if (text) {
+      setRunning(null);
+      setStatus(text);
     }
-    if (!response?.ok) {
-      logStatus(`startStaffExport rejected: ${response?.error || 'unknown'}`, 'error');
-      setUiState('form');
+    return;
+  }
+  if (message.kind === "error") {
+    setStatus(message.message || "Something went wrong.", "err");
+    return;
+  }
+  if (message.kind === "done") {
+    renderCounts(message.counts);
+    const errors = message.errors?.length || 0;
+    setStatus(
+      errors
+        ? `Finished with ${errors} item(s) skipped. Review them in Brightlight.`
+        : "Finished. Go back to Brightlight to review and load.",
+      errors ? "warn" : "ok"
+    );
+  }
+});
+
+// On open, ask the worker whether anything is in flight — a panel reopened
+// mid-run should show the run, not a blank slate.
+chrome.runtime
+  .sendMessage({type: "panelStatus"})
+  .then((status) => {
+    $("version").textContent = chrome.runtime.getManifest().version;
+    if (status?.run) {
+      setRunning(status.run);
+      setStatus("Copying…");
+    } else {
+      setIdle();
     }
+  })
+  .catch(() => {
+    $("version").textContent = chrome.runtime.getManifest().version;
+    setIdle();
   });
-});
-
-els.backBtn.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ action: 'stopExport' }, () => {
-    setUiState('form');
-    logStatus('Cancelled preflight, edit names and resolve again.', 'warn');
-  });
-});
-
-els.startBtn.addEventListener('click', () => {
-  const resolved = reviewRows
-    .filter((r) => r.status === 'ok' && r.picked)
-    .map((r) => ({
-      input_name: r.input_name,
-      staff_id: r.picked.staff_id,
-      staff_name: r.picked.staff_name,
-    }));
-  if (resolved.length === 0) {
-    logStatus('Nothing resolved — add staff and resolve first.', 'error');
-    return;
-  }
-  els.startBtn.disabled = true;
-  chrome.runtime.sendMessage({ action: 'confirmStaffResolution', resolvedStaff: resolved }, (response) => {
-    if (chrome.runtime.lastError) {
-      logStatus(`Start failed: ${chrome.runtime.lastError.message}`, 'error');
-      els.startBtn.disabled = false;
-      return;
-    }
-    if (!response?.ok) {
-      logStatus(`Start rejected: ${response?.error || 'unknown'}`, 'error');
-      els.startBtn.disabled = false;
-      return;
-    }
-    setUiState('running');
-    setPhase('discovery', { staffCompleted: 0, totalStaff: resolved.length });
-  });
-});
-
-els.stopBtn.addEventListener('click', () => {
-  // Optimistic UI: snap back to the form immediately so the user isn't
-  // hunting for feedback while the background tears down worker tabs.
-  reviewRows = [];
-  autoConfirmPending = false;
-  els.reviewRows.replaceChildren();
-  setUiState('form');
-  setPhase('stopped');
-  chrome.runtime.sendMessage({ action: 'stopExport' }, (response) => {
-    if (response?.ok) logStatus('Stop signal sent', 'warn');
-    else logStatus(`Stop failed: ${response?.error || 'unknown'}`, 'error');
-  });
-});
-
-function buildReviewRowElement(row, rowIndex) {
-  const badgeInfo = row.status === 'ok' ? { cls: 'badge-ok', txt: '\u2713' }
-    : row.status === 'ambiguous' ? { cls: 'badge-warn', txt: '!' }
-    : { cls: 'badge-err', txt: '\u2717' };
-
-  const container = document.createElement('div');
-  container.className = 'review-row';
-
-  const badge = document.createElement('span');
-  badge.className = `badge ${badgeInfo.cls}`;
-  badge.textContent = badgeInfo.txt;
-
-  const nameWrap = document.createElement('div');
-  nameWrap.className = 'review-name';
-  const inputName = document.createElement('span');
-  inputName.className = 'input-name';
-  inputName.textContent = row.input_name;
-  const matchedName = document.createElement('span');
-  matchedName.className = 'matched-name';
-  nameWrap.append(inputName, matchedName);
-
-  const right = document.createElement('div');
-
-  if (row.status === 'ok' && row.picked) {
-    const piecesParts = [row.picked.staff_name];
-    if (row.picked.title) piecesParts.push(row.picked.title);
-    matchedName.textContent = piecesParts.join(' · ');
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'row-action';
-    removeBtn.textContent = 'remove';
-    removeBtn.onclick = () => { reviewRows.splice(rowIndex, 1); renderReview(); };
-    right.appendChild(removeBtn);
-  } else if (row.status === 'ambiguous') {
-    matchedName.textContent = `${row.candidates.length} candidates`;
-    const select = document.createElement('select');
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'pick one…';
-    select.appendChild(placeholder);
-    for (const c of row.candidates) {
-      const opt = document.createElement('option');
-      opt.value = String(c.staff_id);
-      opt.textContent = c.title ? `${c.staff_name} · ${c.title}` : c.staff_name;
-      select.appendChild(opt);
-    }
-    select.onchange = (event) => {
-      const pick = row.candidates.find((c) => String(c.staff_id) === String(event.target.value));
-      if (pick) {
-        row.status = 'ok';
-        row.picked = pick;
-        renderReview();
-      }
-    };
-    right.appendChild(select);
-  } else {
-    matchedName.textContent = 'not found';
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'row-action';
-    removeBtn.textContent = 'remove';
-    removeBtn.onclick = () => { reviewRows.splice(rowIndex, 1); renderReview(); };
-    right.appendChild(removeBtn);
-  }
-
-  container.append(badge, nameWrap, right);
-  return container;
-}
-
-function renderReview() {
-  els.reviewRows.replaceChildren();
-  let resolvedCount = 0;
-  for (let i = 0; i < reviewRows.length; i++) {
-    if (reviewRows[i].status === 'ok' && reviewRows[i].picked) resolvedCount += 1;
-    els.reviewRows.appendChild(buildReviewRowElement(reviewRows[i], i));
-  }
-  els.reviewResolvedCount.textContent = String(resolvedCount);
-  els.reviewTotalCount.textContent = String(reviewRows.length);
-  const unresolved = reviewRows.length - resolvedCount;
-  els.reviewSummary.textContent = unresolved === 0 ? 'all resolved' : `${unresolved} unresolved`;
-  els.startBtn.disabled = unresolved > 0 || reviewRows.length === 0;
-}
-
-chrome.runtime.onMessage.addListener((request) => {
-  if (request.action === 'statusUpdate') {
-    const raw = request.status?.message || '';
-    const tag = request.status?.threadId ? `[${request.status.threadId}] ` : '';
-    logStatus(tag + raw, request.status?.type || 'info');
-    return;
-  }
-  if (request.action === 'preflightResults') {
-    reviewRows = (request.rows || []).map((r) => ({
-      input_name: r.input_name,
-      status: r.status,
-      candidates: r.candidates || [],
-      picked: r.status === 'ok' && r.candidates?.length === 1 ? r.candidates[0] : null,
-    }));
-
-    const allResolvedCleanly = reviewRows.length > 0
-      && reviewRows.every((r) => r.status === 'ok' && r.picked);
-
-    if (autoConfirmPending || allResolvedCleanly) {
-      autoConfirmPending = false;
-      const resolved = reviewRows
-        .filter((r) => r.status === 'ok' && r.picked)
-        .map((r) => ({
-          input_name: r.input_name,
-          staff_id: r.picked.staff_id,
-          staff_name: r.picked.staff_name,
-        }));
-      if (resolved.length === 0) {
-        logStatus('No staff found in directory — check login and try again', 'error');
-        setUiState('form');
-        return;
-      }
-      logStatus(`Auto-starting with ${resolved.length} staff`, 'info');
-      chrome.runtime.sendMessage({ action: 'confirmStaffResolution', resolvedStaff: resolved }, (response) => {
-        if (chrome.runtime.lastError || !response?.ok) {
-          logStatus(`Auto-start failed: ${response?.error || chrome.runtime.lastError?.message || 'unknown'}`, 'error');
-          setUiState('form');
-          return;
-        }
-        setUiState('running');
-        setPhase('discovery', { staffCompleted: 0, totalStaff: resolved.length });
-      });
-      return;
-    }
-
-    setUiState('review');
-    renderReview();
-    return;
-  }
-  if (request.action === 'phaseUpdate') {
-    logStatus(`[panel] phase update → ${request.phase}`, 'info');
-    setPhase(request.phase, request);
-    if (request.phase === 'done' || request.phase === 'stopped') {
-      reviewRows = [];
-      els.reviewRows.replaceChildren();
-      setUiState('form');
-    }
-    return;
-  }
-});
-
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.chartQueueProgress) {
-    updateStats(changes.chartQueueProgress.newValue);
-  }
-});
-
-(async function init() {
-  const data = await chrome.storage.local.get(['runState', 'chartQueueProgress']);
-  updateStats(data.chartQueueProgress);
-  const terminalPhases = ['idle', 'done', 'stopped'];
-  if (data.runState && data.runState.phase && !terminalPhases.includes(data.runState.phase)) {
-    setUiState('running');
-    setPhase(data.runState.phase);
-    logStatus(`Reconnected (phase: ${data.runState.phase})`, 'info');
-  } else {
-    setUiState('form');
-  }
-})();
