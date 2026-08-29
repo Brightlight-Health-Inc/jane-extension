@@ -437,6 +437,13 @@
           state.errors.push({item: `file:${file.id}`, message: "exceeds size limit"});
           return;
         }
+        // Jane answered, with nothing in it. Posting that is a round trip whose
+        // only possible outcome is the server rejecting an empty body, so the
+        // gap is recorded here instead — with a reason that says what happened.
+        if (blob.size === 0) {
+          state.errors.push({item: `file:${file.id}`, message: "Jane served an empty file"});
+          return;
+        }
         // Blobs cannot cross the extension messaging boundary, so the bytes
         // travel as a data URL and the service worker rebuilds them.
         const dataUrl = await new Promise((resolve, reject) => {

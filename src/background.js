@@ -329,7 +329,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               );
         return sendResponse({ok: true, result});
       } catch (error) {
-        report({kind: "error", message: error.message, code: error.code});
+        // One record failing is not the copy failing.
+        //
+        // This used to report `error`, which the page treats as fatal: it tore
+        // down the bridge, replaced the progress with a red banner, and froze
+        // the count — while the copy carried on downloading perfectly well in
+        // the tab beside it. One document Jane served empty was enough to make
+        // a healthy migration of 9,211 look dead.
+        //
+        // The content script already handles this properly: the item is
+        // recorded in `errors` and the sweep moves on. So the page is told what
+        // it is — one item, skipped — and keeps watching.
+        report({
+          kind: "item-error",
+          item: message.type === "blob" ? `file:${message.sourceId}` : message.entity,
+          message: error.message,
+          code: error.code,
+        });
         return sendResponse({ok: false, error: error.message});
       }
     }

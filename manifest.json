@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Brightlight Migrator",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Copies a clinic's own Jane records into Brightlight Health. Driven from Brightlight; nothing is configured here.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAttChYsM+4oQfbPih4caVAJ2YvwfToDZq1b2hLiqa2Rt2vHnsNvTcHqZitm9+iJOY6ADyF8LeJcylayiKfvN6nH9HUSMCFbx8ESATjc6ddSQO9X6I80kR9KGMPwryW1seR3OvNbZgHJYkgzh1e89Tc1Tv9+xJCRVS87djeygQXGPR79W/MFfT+VgmiabstVUjwqiDmo0h06dOkSO+ZpRs0ckB6Cg0H74U9XNKKckzLp5Ne4ffJYtz2/tA5n/SSUpHjWwPZGfvX6I4FAW1FVlvosdrP7dn7G13dAx5xrfCk//xnIhiyJDclLth1kx0+U87W6FYQBPyc5ZRW4HeN/WyTwIDAQAB",
   "icons": {
