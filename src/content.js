@@ -151,8 +151,24 @@
       );
     }
 
+    // A resume that only owes documents does not crawl the clinic again.
+    //
+    // The list of documents is the output of sweeping every patient, and on a
+    // resume Brightlight is already holding it — it sends the outstanding ones
+    // with their download URLs. Rebuilding that list costs twenty minutes
+    // before a single byte can move, and it is where the copy kept dying: three
+    // resumes in a row finished "successfully" having downloaded nothing,
+    // because none survived the sweep long enough to reach the files.
+    const binariesOnly = plan.resumeBinariesOnly === true;
+    if (binariesOnly) {
+      progress({
+        type: "phase",
+        message: `Resuming: ${(plan.binaries?.pending || []).length} documents left to copy.`,
+      });
+    }
+
     // ---- reference ---------------------------------------------------------
-    for (const step of plan.reference || []) {
+    for (const step of binariesOnly ? [] : plan.reference || []) {
       if (state.cancelled) break;
       const result = await fetchJson(step.path, plan);
       if (result.missing) continue;
@@ -169,7 +185,7 @@
     // Runs before the per-patient work because it is one cheap request per year
     // and it tells the operator immediately how big the job is.
     const calendarAppointments = [];
-    if (plan.calendar && !state.cancelled) {
+    if (plan.calendar && !binariesOnly && !state.cancelled) {
       const {startYear, endYear} = plan.calendar.chunk;
       for (let year = startYear; year <= endYear && !state.cancelled; year += 1) {
         const path = plan.calendar.path
@@ -217,7 +233,7 @@
 
     // ---- patients ----------------------------------------------------------
     const patientIds = [];
-    if (plan.patients && !state.cancelled) {
+    if (plan.patients && !binariesOnly && !state.cancelled) {
       if (plan.patients.mode === "explicit") {
         await pool(plan.patients.ids, plan, async (id) => {
           const result = await fetchJson(plan.patients.path.replace("{id}", id), plan);
@@ -295,7 +311,7 @@
     const appointmentIds = new Set();
     const fileRecords = [];
 
-    for (const step of plan.perPatient || []) {
+    for (const step of binariesOnly ? [] : plan.perPatient || []) {
       if (state.cancelled) break;
       let processed = 0;
 
@@ -355,7 +371,7 @@
     // Which ids depends on the scope: a full migration enriches everything the
     // calendar found (minus schedule furniture), while a charts-only run
     // enriches just the visits a chart names.
-    if (plan.appointments && !state.cancelled) {
+    if (plan.appointments && !binariesOnly && !state.cancelled) {
       const source = plan.appointments.idsFrom || {};
       let ids;
       if (source.step === "calendar") {
@@ -392,9 +408,13 @@
       // that starts from zero would ask the clinic's Jane for the same gigabytes
       // a second time.
       const alreadyStaged = new Set((plan.binaries.alreadyStaged || []).map(String));
-      const pending = alreadyStaged.size
-        ? fileRecords.filter((file) => !alreadyStaged.has(String(file.id)))
-        : fileRecords;
+      // Brightlight's list when it has one — it knows exactly which documents
+      // it is missing — and otherwise what this sweep just found.
+      const pending = plan.binaries.pending?.length
+        ? plan.binaries.pending
+        : alreadyStaged.size
+          ? fileRecords.filter((file) => !alreadyStaged.has(String(file.id)))
+          : fileRecords;
 
       if (alreadyStaged.size) {
         progress({
