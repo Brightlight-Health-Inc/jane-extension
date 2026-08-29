@@ -287,10 +287,17 @@ async function runMigration({serverUrl, tenant, token, importRunId, janeHost}) {
 
   // Tell Brightlight what we believe we sent, so a silent partial copy cannot
   // pass as complete.
+  //
+  // The errors travel too. A document Jane refuses to serve — deleted there, or
+  // larger than the copy will carry — has no bytes, and so does a document the
+  // copy simply never reached. Those are the same absence with opposite
+  // meanings: one is a documented gap, the other is an unfinished job. Sending
+  // only the counts left Brightlight unable to tell them apart, and an
+  // unfinished job that cannot be recognised is one nobody finishes.
   const finish = await postJson(
     session,
     `/migration/jane/runs/${importRunId}/extraction-complete`,
-    {counts: result.result.counts}
+    {counts: result.result.counts, errors: result.result.errors || []}
   );
 
   activeRun = null;
