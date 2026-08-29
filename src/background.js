@@ -404,6 +404,25 @@ chrome.runtime.onConnectExternal.addListener((port) => {
   });
 
   port.onMessage.addListener(async (message) => {
+    // "Is a copy running?"
+    //
+    // The page cannot otherwise know. It reconnects after every reload with no
+    // memory, so it offered "Copy the rest" over a copy that was already three
+    // thousand documents in — and the only way to find out was to press it and
+    // read the refusal.
+    //
+    // A "yes" here is proof. A "no" is not: `activeRun` lives in a service
+    // worker Chrome discards whenever it likes, so the page must still treat an
+    // absent answer as "cannot tell" rather than "nothing is running".
+    if (message?.type === "runStatus") {
+      port.postMessage({
+        kind: "status",
+        running: Boolean(activeRun),
+        importRunId: activeRun?.importRunId || null,
+      });
+      return;
+    }
+
     if (message?.type === "cancelRun") {
       if (!activeRun?.tabId) {
         port.postMessage({kind: "error", message: "Nothing is running."});
@@ -426,7 +445,15 @@ chrome.runtime.onConnectExternal.addListener((port) => {
     if (message?.type !== "startRun") return;
 
     if (activeRun) {
-      port.postMessage({kind: "error", message: "A copy is already running in this browser."});
+      // Not an error: the operator asked for the thing that is already
+      // happening. Say so as a status, so the page can attach to it rather than
+      // showing a red failure over a copy that is working perfectly.
+      port.postMessage({
+        kind: "status",
+        running: true,
+        importRunId: activeRun.importRunId,
+        message: "A copy is already running in this browser.",
+      });
       return;
     }
 
